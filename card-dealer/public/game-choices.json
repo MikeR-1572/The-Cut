@@ -1,0 +1,482 @@
+[
+  {
+    "id": "draw-5card",
+    "displayName": "5-Card Draw",
+    "profile": "draw",
+    "reAnteable": false,
+    "advanceTurnRequired": false,
+    "burnAvailable": false,
+    "requiresOpeners": false,
+    "description": "Classic 5-Card Draw poker",
+    "rules": "Each player is dealt 5 cards face down. A betting round follows.\n\nEach player may then discard up to the maximum discards allowed. The maximum is the Dealer's Choice.\n\nThe Dealer then deals the replacement cards (called the Draw). A final betting round follows.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 5,
+      "anteType": "flat"
+    },
+    "dealerOptions": {
+      "maxDiscards": 4,
+      "anteAmount": 1,
+      "audible": "",
+      "smallBet": 2,
+      "bigBet": 4,
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    }
+  },
+  {
+    "id": "draw-5card-jacks",
+    "displayName": "5-Card Draw — Jacks or Better to Open",
+    "profile": "draw",
+    "reAnteable": true,
+    "advanceTurnRequired": false,
+    "burnAvailable": false,
+    "requiresOpeners": true,
+    "description": "5-Card Draw - Jacks or Better",
+    "rules": "5-Card Draw (Variant)\n\nTo open the first betting round, a player must have a pair of jacks or better.\n\nIf nobody can open, the cards are mucked and a new hand is dealt. The pot carries over to the new hand.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 5,
+      "anteType": "flat"
+    },
+    "dealerOptions": {
+      "maxDiscards": 4,
+      "anteAmount": 1,
+      "audible": "",
+      "smallBet": 2,
+      "bigBet": 4,
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    }
+  },
+  {
+    "id": "draw-5card-jacks-trips",
+    "displayName": "5-Card Draw — Jacks or Better, Trips to Win",
+    "profile": "draw",
+    "reAnteable": true,
+    "advanceTurnRequired": false,
+    "burnAvailable": false,
+    "requiresOpeners": true,
+    "description": "5-Card Draw - Jacks or Better, Trips to Win",
+    "rules": "5-Card Draw (Variant)\n\nTo open the first betting round, a player must have a pair of jacks or better.\n\nTo win, a player must have 3 of a Kind or better.\n\nIf nobody can open or win, the cards are mucked and a new hand is dealt. The pot carries over to the new hand.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 5,
+      "anteType": "flat"
+    },
+    "dealerOptions": {
+      "maxDiscards": 4,
+      "anteAmount": 1,
+      "audible": "",
+      "smallBet": 2,
+      "bigBet": 4,
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    }
+  },
+  {
+    "id": "stud-5card",
+    "displayName": "5-Card Stud",
+    "profile": "stud",
+    "description": "5-Card Stud",
+    "rules": "5-Card Stud\n\n5 cards dealt per player: 1 down + 4 up.\n\n2 cards dealt in first betting round (called 2nd Street). Player with the low card starts the betting with a forced-bet called the Bring-In.\n\n1 card dealt for each of the next 3 betting rounds (3rd, 4th & 5th Streets). Player with the highest showing cards begins the betting in these rounds.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 5,
+      "pattern": [
+        "down",
+        "up",
+        "up",
+        "up",
+        "up"
+      ],
+      "anteType": "flat",
+      "bettingStartsWith": "Low/High"
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "D"
+  },
+  {
+    "id": "stud-7card",
+    "displayName": "7-Card Stud",
+    "profile": "stud",
+    "description": "7-Card Stud",
+    "rules": "7-Card Stud\n\n7 cards dealt per player: 2 down + 4 up + 1 down.\n\n3 cards dealt in first betting round (called 3rd Street). Player with the low card starts the betting with a forced-bet called the Bring-In.\n\n1 card dealt for each of the next 4 betting rounds (4th, 5th, 6th & 7th Streets). Player with the highest showing cards begins the betting in these rounds.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "bettingStartsWith": "Low/High"
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "stud-7card-razz",
+    "displayName": "7-Card Stud — Razz",
+    "profile": "stud",
+    "description": "7-Card Stud – Razz – LOW HAND WINS!",
+    "rules": "7-Card Stud Lowball (Variant)\n\nLOWEST HAND WINS!\n\nRules for Low Hand is a Dealer Option.\n\nOn 3rd Street, highest card makes the Bring-In bet.\n\nOn 4th – 7th Street, lowest cards showing opens the betting.\n\nSuit Ranking: Clubs < Diamonds < Hearts < Spades",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "bettingStartsWith": "High/Low"
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "lowHandRules": "Ace-to-Five",
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "stud-7card-stud8",
+    "displayName": "7-Card Stud — Hi/Lo (Stud 8 or Better)",
+    "profile": "stud",
+    "description": "7-Card Stud – Hi-Lo / 8 or Better / Stud 8",
+    "rules": "7-Card Stud Split Pot (Variant)\n\nHigh hand and Lowest QUALIFIED hand split the pot.\n\nLow Hand Qualifications:\n* Ace-To-Five ranking\n* No Pairs\n* No card higher than an 8\n* Straights and flushes are not counted against the player\n\nIf there is no qualified low hand, then high hand takes the whole pot.\n\nYou may use different cards to play for both the High and Low hand.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "bettingStartsWith": "Low/High"
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "lowHandRules": "Stud 8",
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "stud-7card-follow-queen",
+    "displayName": "7-Card Stud — Follow the Queen",
+    "profile": "stud",
+    "description": "7-Card Stud – Follow the Queen",
+    "rules": "7-Card Stud with Wildcards (Variant)\n\nIf and when a Queen is dealt face up, the next card dealt face up is wild. If another Queen is dealt face up, the next card dealt face up replaces the previous wildcard.\n\nIf the final card dealt face up is a Queen, then there are no wild cards.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "bettingStartsWith": "Low/High"
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "stud-7card-baseball",
+    "displayName": "7-Card Stud — Baseball",
+    "profile": "stud",
+    "description": "7-Card Stud – Baseball",
+    "rules": "7-Card Stud Wildcards (Variant)\n\nBasics:\n* 9s are always wild\n* 3s are sometimes wild\n* Players dealt a 4 face up may buy another card\n\nDealer Options To Watch For:\n* Do 3s dealt face up require payment?\n* Are all 3s wild or only face up or face down?\n* Do 4s require payment to get an extra card",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "dealIsInterruptable": true,
+      "bettingStartsWith": "Low/High"
+    },
+    "dealerOptions": {
+      "anteAmount": 2,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "threesUpOrDownWild": "either",
+      "priceForThrees": "free",
+      "priceForFours": "bigBet",
+      "extraCardUpOrDown": "down",
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "stud-7card-baseball-hilo",
+    "displayName": "7-Card Stud — Baseball (Hi/Lo)",
+    "profile": "stud",
+    "description": "7-Card Stud – Baseball (Hi / Lo)",
+    "rules": "7-Card Stud Wildcards (Variant)\n\nHigh / Low hands split the Pot.\n\nBasics:\n* 9s are always wild\n* 3s are sometimes wild\n* Players dealt a 4 face up may buy another card\n\nDealer Options To Watch For:\n* Do 3s dealt face up require payment?\n* Are all 3s wild or only face up or face down?\n* Do 4s require payment to get an extra card\n* What are the Low Hand Rules",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "dealIsInterruptable": true,
+      "declareHighLowBoth": true,
+      "bettingStartsWith": "Low/High",
+      "declareOptions": {
+        "a": "High",
+        "b": "Low"
+      }
+    },
+    "dealerOptions": {
+      "anteAmount": 2,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "lowHandRules": "Ace-to-Five",
+      "threesUpOrDownWild": "either",
+      "priceForThrees": "free",
+      "priceForFours": "bigBet",
+      "extraCardUpOrDown": "down",
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "stud-7card-black-mariah",
+    "displayName": "7-Card Stud — Black Mariah",
+    "profile": "stud",
+    "reAnteable": true,
+    "hasKillCard": true,
+    "killCard": "Qs",
+    "description": "7-Card Stud – Black Mariah",
+    "rules": "7-Card Stud (Variant)\n\nWinning the hand requires having BOTH the:\n* Highest hand and\n* Highest FACE DOWN spade\n\nQUEEN OF SPADES –\n\nIf the Queen of Spades is dealt face up, the hand ends immediately.\n\nIf either the Queen of Spades comes up or no player meets the winning hand requirements, the cards are mucked and a new hand is dealt. The pot carries over to the new hand.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "bettingStartsWith": "Low/High"
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "stud-7card-high-chicago",
+    "displayName": "7-Card Stud — High Chicago (Split Pot)",
+    "profile": "stud",
+    "description": "7-Card Stud – High Chicago",
+    "rules": "7-Card Stud Split Pot (Variant)\n\nPot is Split Between:\n* Highest hand and\n* Highest FACE DOWN spade\n* Ace is highest card for spade down\n\nPrior to showing hand, players must declare whether they are playing for the High hand, Highest Spade, or Both. If a player declares for \"Both\", he must win both in order to win anything.\n\nIf no spade is down, player winning the High hand wins the entire pot.\n\nAny portion of pot not allocated carries over to the next game.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "declareHighLowBoth": true,
+      "bettingStartsWith": "Low/High",
+      "declareOptions": {
+        "a": "High Hand",
+        "b": "High Spade"
+      }
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "stud-7card-low-chicago",
+    "displayName": "7-Card Stud — Low Chicago (Split Pot)",
+    "profile": "stud",
+    "description": "7-Card Stud – Low Chicago",
+    "rules": "7-Card Stud Split Pot (Variant)\n\nPot is Split Between:\n* Highest hand and\n* Lowest FACE DOWN spade\n* Deuce is the lowest card\n\nPrior to showing hand, players must declare whether they are playing for the High hand, Lowest Spade, or Both. If a player declares for \"Both\", he must win both in order to win anything.\n\nIf no spade is down, player winning the High hand wins the entire pot.\n\nAny portion of pot not allocated carries over to the next game.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 7,
+      "pattern": [
+        "down",
+        "down",
+        "up",
+        "up",
+        "up",
+        "up",
+        "down"
+      ],
+      "anteType": "flat",
+      "declareHighLowBoth": true,
+      "bettingStartsWith": "Low/High",
+      "declareOptions": {
+        "a": "High Hand",
+        "b": "Low Spade"
+      }
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "bringIn": 1,
+      "smallBet": 2,
+      "bigBet": 4,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    },
+    "finalStreet": "E"
+  },
+  {
+    "id": "holdem-texas",
+    "displayName": "Texas Hold'em",
+    "profile": "holdem",
+    "description": "Texas Hold'em",
+    "rules": "Texas Hold'em\n\nOpening Deal\nEach player is dealt 2 cards face down.\n\nThe Flop\n3 Community Cards are dealt to the center of the table.\n\nThe Turn\n1 additional Community Card is added to the 3 already there.\n\nThe River\n1 last Community Card is added, making 5 Community Cards.\n\nA round of betting takes place after each of the 4 deals. After the River betting round, players make their best 5 card hand from their 2 down cards & the 5 community cards.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 2,
+      "communityPattern": [
+        3,
+        1,
+        1
+      ],
+      "anteType": "blind"
+    },
+    "dealerOptions": {
+      "smallBlind": 5,
+      "bigBlind": 10,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    }
+  },
+  {
+    "id": "holdem-omaha",
+    "displayName": "Omaha",
+    "profile": "holdem",
+    "description": "Omaha",
+    "rules": "Texas Hold'em (Variant)\n\nSame as Texas Hold'em with the following changes:\n* 4 cards are dealt to each player in the opening deal\n* To make their best hand, players must use exactly 2 of their down cards and 3 of the community cards",
+    "hiddenOptions": {
+      "cardsPerPlayer": 4,
+      "communityPattern": [
+        3,
+        1,
+        1
+      ],
+      "anteType": "blind"
+    },
+    "dealerOptions": {
+      "smallBlind": 5,
+      "bigBlind": 10,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    }
+  },
+  {
+    "id": "holdem-omaha-8",
+    "displayName": "Omaha/8 (Hi/Lo)",
+    "profile": "holdem",
+    "description": "Omaha/8 (Hi / Lo)",
+    "rules": "Omaha Split Pot (Variant)\n\nHigh hand and Lowest QUALIFIED hand split the pot.\n\nLow Hand Qualifications (Stud 8 rules):\n* Ace-To-Five ranking\n* No Pairs\n* No card higher than an 8\n* Straights and flushes are not counted against the player\n\nIf there is no qualified low hand, then high hand takes the whole pot.\n\nYou may use different cards to play for both the High and Low hand.",
+    "hiddenOptions": {
+      "cardsPerPlayer": 4,
+      "communityPattern": [
+        3,
+        1,
+        1
+      ],
+      "anteType": "blind"
+    },
+    "dealerOptions": {
+      "smallBlind": 5,
+      "bigBlind": 10,
+      "audible": "",
+      "bettingStructure": "no-limit",
+      "raiseCap": "no-cap"
+    }
+  }
+]

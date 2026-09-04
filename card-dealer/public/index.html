@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The Cut &mdash; Card Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <div class="felt-backdrop" aria-hidden="true"></div>
+
+  <!-- ============== LOBBY ============== -->
+  <main id="view-lobby" class="view view-lobby">
+    <header class="brand">
+      <span class="brand-mark" aria-hidden="true">&#9827;</span>
+      <div>
+        <h1>The Cut</h1>
+        <p class="brand-sub">A table for whatever game you bring to it</p>
+      </div>
+    </header>
+
+    <section class="lobby-grid">
+      <div class="lobby-card">
+        <h2>Open a table</h2>
+        <p class="hint">You'll be seated first &mdash; and hold the Dealer's shoe.</p>
+        <label class="field">
+          <span>Your name</span>
+          <input type="text" id="create-name" maxlength="24" placeholder="e.g. Rowan" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Table name <span class="field-optional">(optional)</span></span>
+          <input type="text" id="create-table-name" maxlength="40" placeholder="e.g. Friday Night" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Suggested buy-in <span class="field-optional">(optional)</span></span>
+          <input type="number" id="create-suggested-buyin" min="1" placeholder="e.g. 100" class="mono-input" title="Players entering with fewer chips than this get a Buy Chips prompt automatically" />
+        </label>
+        <button class="btn btn-primary" id="btn-create-game-table" title="Create a new table and become its Dealer">Open Table</button>
+      </div>
+
+      <div class="lobby-divider" aria-hidden="true"><span>or</span></div>
+
+      <div class="lobby-card">
+        <h2>Join a table</h2>
+        <p class="hint">Ask whoever opened the table for their code.</p>
+        <label class="field">
+          <span>Table code</span>
+          <input type="text" id="join-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+        </label>
+        <label class="field">
+          <span>Your name</span>
+          <input type="text" id="join-name" maxlength="24" placeholder="e.g. Sasha" autocomplete="off" />
+        </label>
+        <button class="btn btn-secondary" id="btn-join-game-table" title="Join this table with the code above">Take a Seat</button>
+      </div>
+    </section>
+
+    <p class="lobby-error" id="lobby-error" role="alert" hidden></p>
+  </main>
+
+  <!-- ============== TABLE ============== -->
+  <main id="view-gametabletop" class="view view-gametabletop" hidden>
+    <header class="table-header">
+      <div class="table-header-left">
+        <span class="table-id-code" id="game-table-code-display" title="Table code">&mdash;</span>
+        <span class="table-name" id="table-name-display" title="Table name">&mdash;</span>
+      </div>
+      <p class="phase-banner" id="phase-banner">THE CUT &ndash; Dealer's Choice</p>
+      <div class="deck-status">
+        <span class="deck-label">cards left in shoe</span>
+        <span class="deck-count" id="deck-count">52</span>
+      </div>
+    </header>
+
+    <div class="game-rail" id="game-rail">
+      <span class="game-rail-description" id="game-rail-description"></span>
+      <div class="game-rail-buttons">
+        <button class="btn btn-secondary" id="btn-same-game" type="button" hidden title="Start a fresh hand of the current Game Choice">Same Game</button>
+        <button class="btn btn-secondary" id="btn-open-select-dialog" type="button" hidden title="Choose the Game Choice for the next hand">Select</button>
+        <button class="btn btn-secondary" id="btn-open-options-dialog" type="button" disabled title="View or edit the active Game Choice's options">Options</button>
+        <button class="btn btn-secondary" id="btn-open-rules-dialog" type="button" title="Browse rules for every Game Choice">Game Rules</button>
+      </div>
+    </div>
+
+    <p class="table-error" id="table-error" role="alert" hidden></p>
+    <!-- NEW 8.1 (§5.10 extension): brief, non-blocking announcement for
+         an auto-resolved (Free-price) deal interrupt -- spec's own
+         wording. Auto-dismisses; see renderAnnouncement() in client.js. -->
+    <p class="table-announcement" id="table-announcement" role="status" hidden></p>
+    <!-- NEW 8.2 (§5.10 extension, §6.9): persistent (state-driven, NOT
+         auto-dismissing) table-wide notice -- the Baseball deal-interrupt
+         "who's deciding what" notice, or Kill Hand's "about to kill this
+         hand" notice. Styled the same as the Phase Banner (§10.7) per
+         spec, not a modal. See renderTableNotice() in client.js. -->
+    <p class="table-notice" id="table-notice" role="status" hidden></p>
+
+    <section class="claim-banner" id="claim-banner" hidden>
+      <div id="claim-banner-body"></div>
+      <div class="rail-row" id="claim-banner-actions" hidden>
+        <button class="btn btn-primary" id="btn-approve-claim" type="button" title="Approve this pot claim">Approve</button>
+        <button class="btn btn-secondary" id="btn-reject-claim" type="button" title="Reject this pot claim">Reject</button>
+      </div>
+    </section>
+
+    <div class="table-body" id="table-body">
+      <!-- NEW 9.2 (§10.2): collapsible, click-to-toggle -- reclaims table
+           space since chip total is already shown a second time at the
+           seat itself. The toggle tab stays visible regardless of
+           collapsed/expanded state. -->
+      <aside class="player-rail" id="player-rail">
+        <button class="player-rail-toggle has-hint" id="btn-player-rail-toggle" type="button" title="Collapse/expand your rail" aria-expanded="true">&#8249;</button>
+        <div class="player-rail-content" id="player-rail-content">
+          <h2>Your rail</h2>
+          <div class="rail-group own-chip-readout" id="own-chip-readout"></div>
+          <div class="rail-group">
+            <button class="btn btn-secondary" id="btn-sit-toggle" type="button" title="Sit out or back in">Sit Out</button>
+          </div>
+          <!-- CHANGED 7.2 (§10.2): About moves to its own line below Buy
+               Chips -- no longer needs to share a line with it. Rail width
+               deliberately left unchanged this release (see spec). -->
+          <div class="rail-group rail-row rail-row--secondary">
+            <button class="btn btn-secondary btn-small" id="btn-open-buy-dialog" type="button" title="Add chips to your stack">Buy Chips</button>
+          </div>
+          <div class="rail-group rail-row rail-row--secondary">
+            <button class="btn btn-secondary btn-small" id="btn-open-about-dialog" type="button" title="About this app">About</button>
+          </div>
+          <!-- NEW 10.4 (the-cut-spec_v10-4.md Part A §5): Table-Owner-only,
+               visible only when creatorId === the viewer's own id -- see
+               renderTableOwnerControls() in client.js. -->
+          <div class="rail-group rail-row rail-row--secondary" id="table-owner-rail-group" hidden>
+            <button class="btn btn-secondary btn-small" id="btn-open-table-owner-dialog" type="button" title="Emergency table recovery tools">Table Owner Tools</button>
+          </div>
+        </div>
+      </aside>
+
+      <section class="gametabletop-surface" id="gametabletop-surface" aria-label="Table">
+        <div class="oval-surface" aria-hidden="true"></div>
+        <div class="community-cards" id="community-cards" aria-hidden="true"></div>
+        <div class="burn-pile" id="burn-pile" aria-hidden="true"></div>
+        <div class="rabbit-hunt-cards" id="rabbit-hunt-cards" aria-hidden="true"></div>
+        <div class="pot-display" id="pot-display" aria-hidden="true">
+          <span class="pot-amount" id="pot-amount">$0</span>
+          <!-- NEW 9.0 (§6.10): horizontal row of pot tiers, shown INSTEAD
+               of pot-amount once gameTable.pots is populated. An ordinary
+               hand with no uneven all-in never shows this -- looks
+               completely unchanged, per spec. -->
+          <div class="pots-row" id="pots-row" hidden></div>
+          <button class="btn btn-secondary btn-claim" id="btn-open-claim-dialog" type="button" title="Propose claiming the pot">Claim Pot</button>
+        </div>
+        <div class="seats" id="seats"></div>
+      </section>
+
+      <aside class="dealer-rail" id="dealer-rail" hidden>
+        <h2>Dealer's rail</h2>
+
+        <div class="rail-group" id="rabbit-hunt-group" hidden>
+          <button class="btn btn-primary" id="btn-rabbit-hunt" type="button" title="Reveal one more card from the deck -- purely for curiosity, no effect on the hand">Rabbit Hunt</button>
+        </div>
+
+        <div class="rail-divider" id="deal-section-divider" hidden></div>
+        <div class="rail-group" id="deal-group">
+          <div class="rail-row">
+            <input type="number" id="cards-per-player" min="1" value="1" class="mono-input" aria-label="Cards per player" title="How many cards to deal each active player" />
+            <button class="btn btn-primary" id="btn-deal" type="button" title="Deal cards to every active player">Deal</button>
+          </div>
+        </div>
+
+        <div class="rail-group" id="new-hand-group" hidden>
+          <button class="btn btn-primary" id="btn-new-hand" type="button" title="Reshuffle and request a fresh ante for another Hand in this Cycle">New Hand</button>
+        </div>
+
+        <div class="rail-divider" id="draw-section-divider" hidden></div>
+        <div class="rail-group" id="deal-to-player-group" hidden>
+          <div class="rail-row">
+            <select id="deal-target-select" aria-label="Target player" title="Player to deal cards to"></select>
+            <input type="number" id="deal-target-count" min="1" class="mono-input" placeholder="Auto" title="Card count (blank = auto-calculate; disabled for All Players)" />
+            <button class="btn btn-secondary" id="btn-deal-to-player" type="button" title="Deal to the selected player(s)">Deal</button>
+          </div>
+        </div>
+
+        <div class="rail-group" id="deal-community-group" hidden>
+          <div class="rail-row">
+            <input type="number" id="deal-community-count" min="1" class="mono-input" placeholder="Auto" title="Card count (blank = auto-calculate from the current street)" />
+            <button class="btn btn-secondary" id="btn-deal-community" type="button" title="Deal the next street of community cards">Deal</button>
+          </div>
+        </div>
+
+        <div class="rail-divider" id="betting-section-divider" hidden></div>
+        <div class="rail-group" id="set-ante-group" hidden>
+          <span class="field-label">Set Ante/Blind</span>
+          <div class="rail-row">
+            <select id="ante-target-select" aria-label="Player to set ante for" title="Player who owes an ante/blind"></select>
+            <input type="number" id="ante-amount" min="0" class="mono-input ante-amount-input" placeholder="$" title="Amount owed (0 clears it)" />
+            <button class="btn btn-secondary" id="btn-set-ante" type="button" title="Set the ante/blind for the selected player">Set</button>
+          </div>
+        </div>
+        <!-- NEW 10.4 (the-cut-spec_v10-4.md B.2 replacement, 10.4
+             Completion Gap 2): Dealer-visible (NOT Table-Owner-only --
+             misdealStuckAntes() is a Dealer-level action, matching every
+             other Dealer control on this rail), visible/enabled only
+             when stuckAntePlayerIds.length > 0 -- see
+             renderDealerRail()'s own logic. -->
+        <div class="rail-group" id="misdeal-group" hidden>
+          <button class="btn btn-secondary" id="btn-misdeal" type="button" title="Misdeal -- a seated player owes more than they have and can't post">Misdeal (Stuck Ante)</button>
+        </div>
+
+        <div class="rail-group" id="opening-bettor-group" hidden>
+          <!-- CHANGED 8.2 (§6.8): the static "Select Opening Bettor" label
+               removed -- the hint text below (7.2, dynamic: "Low Hand
+               Opens Betting" / "High Hand Opens Betting") already conveys
+               the same information and now serves as the dropdown's only
+               label. Carried as an unresolved item into 8.3 after the 8.2
+               code review found this was never actually done despite the
+               spec calling for it -- client.js only ever toggled the
+               group's visibility and the hint text, never removed this
+               span. Fixed now. -->
+          <p class="rail-hint" id="opening-bettor-hint"></p>
+          <div class="rail-row">
+            <select id="opening-bettor-select" aria-label="Opening bettor" title="Who opens this betting round (re-selected every street, §6.8)">
+              <option value="">&mdash; Select &mdash;</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="rail-group" id="open-betting-group">
+          <button class="btn btn-secondary" id="btn-open-betting" type="button" title="Open a new betting round">Open Betting Round</button>
+        </div>
+
+        <div class="rail-divider" id="game-section-divider" hidden></div>
+        <div class="rail-group rail-row" id="reshuffle-advance-turn-group">
+          <button class="btn btn-secondary" id="btn-reshuffle" type="button" title="Collect all cards, shuffle, and reset the hand">Reshuffle</button>
+          <button class="btn btn-secondary" id="btn-advance-turn" type="button" title="Manually move the turn to the next active player">Advance Turn</button>
+        </div>
+
+        <div class="rail-group rail-row">
+          <button class="btn btn-secondary" id="btn-burn" type="button" title="Move the top card of the deck to the discard pile, unseen">Burn</button>
+        </div>
+
+        <div class="rail-group" id="pass-buck-group">
+          <button class="btn btn-secondary" id="btn-pass-buck" type="button" title="Move the Dealer role to the next active seat">Pass the Buck</button>
+        </div>
+      </aside>
+    </div>
+
+    <section class="betting-rail" id="betting-rail" hidden>
+      <div class="betting-rail-shared" id="betting-rail-shared"></div>
+      <!-- NEW 9.2 (§6.10): persistent, not a fading toast -- true for the
+           rest of the betting round once the raise cap is reached. -->
+      <div class="raise-cap-indicator" id="raise-cap-indicator" hidden></div>
+      <div class="betting-rail-personal">
+        <div class="personal-turn-actions" id="personal-turn-actions" hidden>
+          <input type="number" id="bet-amount" class="mono-input" min="1" placeholder="Amount" title="Bet: the opening amount. Raise To: the new total you're raising to." />
+          <!-- NEW 9.0 (§6.10): "the betting UI should compute and display
+               the current legal minimum and maximum raise as live
+               numbers whenever it's the acting player's turn and raising
+               is possible" -- Hold'em only, hidden otherwise. -->
+          <span class="raise-limits-hint" id="raise-limits-hint" hidden></span>
+          <button class="btn btn-primary" id="btn-place-bet" type="button" title="Bet or raise by the entered amount">Bet</button>
+          <button class="btn btn-secondary" id="btn-call" type="button" title="Match the current bet to call">Call</button>
+          <button class="btn btn-secondary" id="btn-check" type="button" title="Pass without betting">Check</button>
+          <!-- NEW 9.0 (§6.11): Hold'em only, hidden for every other
+               profile. A dedicated action rather than an amount inferred
+               as all-in -- committing your entire stack is exclusively
+               this button's job as of 9.0 (Call/Raise are disabled once
+               they'd do that -- see renderBettingRail). -->
+          <button class="btn btn-allin" id="btn-all-in" type="button" hidden title="Commit your entire remaining stack">All In</button>
+        </div>
+        <!-- BUG FIX 5.2 (§5.8): Fold lives outside personal-turn-actions
+             now -- it needs to render during a normal turn-gated betting
+             round AND, independently, during Showdown for any non-folded
+             player (§6.4). Nested inside personal-turn-actions, it was
+             unreachable at Showdown: that container is hidden whenever
+             bettingOpen is false, which it always is by Showdown. -->
+        <div class="personal-fold-action" id="personal-fold-action" hidden>
+          <button class="btn btn-secondary" id="btn-fold" type="button" title="Fold your hand">Fold</button>
+        </div>
+        <div class="personal-ante-action" id="personal-ante-action" hidden>
+          <span class="personal-action-label" id="personal-ante-label">Ante/blind owed: $0</span>
+          <button class="btn btn-primary" id="btn-post-ante" type="button" title="Pay your owed ante/blind into the pot">Post Ante</button>
+        </div>
+        <div class="personal-discard-action" id="personal-discard-action" hidden>
+          <span class="personal-action-label" id="personal-discard-label">Click your cards to select, then:</span>
+          <button class="btn btn-secondary" id="btn-discard" type="button" disabled title="Discard the selected cards">Discard</button>
+          <button class="btn btn-secondary" id="btn-stand-pat" type="button" title="Keep your hand exactly as dealt -- no discard">Stand Pat</button>
+        </div>
+        <!-- NEW 8.1 (§5.11), GENERALIZED 8.2: Declare -- player-submitted,
+             not turn-gated, same shape as ante collection/Discard above.
+             Once `declaration` is set (one-shot, per Mike's call), this
+             hides for that player -- see renderPersonalActions().
+             Button text is entirely dynamic as of 8.2 (declareOptions.a/b,
+             §3) -- 8.1's hardcoded "High"/"Low" was wrong for Chicago,
+             which splits High Hand vs. a spade, never High vs. Low. -->
+        <div class="personal-declare-action" id="personal-declare-action" hidden>
+          <span class="personal-action-label">Declare for the pot:</span>
+          <button class="btn btn-secondary" id="btn-declare-a" type="button">A</button>
+          <button class="btn btn-secondary" id="btn-declare-b" type="button">B</button>
+          <button class="btn btn-secondary" id="btn-declare-both" type="button" title="Declare Both -- must win both halves outright to win anything">Both</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- Buy Chips dialog (v3.2: plain amount, no denominations) ---- -->
+    <dialog id="buy-chips-dialog" class="chip-dialog">
+      <h3>Buy Chips</h3>
+      <label class="field">
+        <span>Amount ($)</span>
+        <input type="number" id="buy-amount-input" min="1" class="mono-input" />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-buy-cancel" title="Close without buying chips">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-buy-confirm" title="Add this amount to your stack">Buy</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Suggested Buy-In editor (NEW 4.5 §10.1): room creator only ---- -->
+    <dialog id="suggested-buyin-dialog" class="chip-dialog">
+      <h3>Suggested Buy-In</h3>
+      <p class="dialog-hint">Players entering the table with fewer chips than this get a Buy Chips prompt automatically. Leave blank to turn it off.</p>
+      <label class="field">
+        <span>Amount ($)</span>
+        <input type="number" id="suggested-buyin-input" min="0" class="mono-input" placeholder="Off" />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-suggested-buyin-cancel" title="Close without saving">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-suggested-buyin-save" title="Save the suggested buy-in">Save</button>
+      </div>
+    </dialog>
+
+    <!-- ---- 7-Card Stud, 7+ player warning (NEW 7.0 §5.10): client-side-only courtesy prompt, checked at Start ---- -->
+    <dialog id="stud-warning-dialog" class="chip-dialog">
+      <h3>7 or More Players Seated</h3>
+      <p class="dialog-hint">7 or more players are seated &mdash; 7-Card Stud may run out of cards before the hand finishes. Start anyway?</p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-stud-warning-cancel" title="Don't start -- stay where you were">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-stud-warning-start" title="Start the hand anyway">Start Anyway</button>
+      </div>
+    </dialog>
+
+    <!-- ---- All-In confirmation (NEW 9.0 §6.11, Hold'em only) ---- -->
+    <dialog id="all-in-dialog" class="chip-dialog">
+      <h3>Go All In?</h3>
+      <p class="dialog-hint" id="all-in-dialog-text"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-all-in-cancel" title="Don't go all-in">Cancel</button>
+        <button type="button" class="btn btn-allin" id="btn-all-in-confirm" title="Commit your entire stack -- cannot be undone">All In</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Kill Hand confirmation (NEW 8.1 §6.9, hasKillCard presets only) ---- -->
+    <dialog id="kill-hand-dialog" class="chip-dialog">
+      <h3>Kill This Hand?</h3>
+      <p class="dialog-hint" id="kill-hand-dialog-text"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-kill-hand-cancel" title="Don't kill the hand">Cancel</button>
+        <button type="button" class="btn btn-kill-hand" id="btn-kill-hand-confirm" title="Kill this hand -- cannot be undone">Kill Hand</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Baseball deal-interrupt: Pay-or-Fold on a face-up 3 (NEW 8.1 §5.10 extension) ---- -->
+    <dialog id="pay-or-fold-dialog" class="chip-dialog">
+      <h3>You Were Dealt a 3</h3>
+      <p class="dialog-hint" id="pay-or-fold-dialog-text"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-deal-interrupt-fold" title="Fold your hand">Fold</button>
+        <button type="button" class="btn btn-primary" id="btn-deal-interrupt-pay" title="Pay into the pot and continue">Pay</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Baseball deal-interrupt: Buy-or-Decline on a face-up 4 (NEW 8.1 §5.10 extension) ---- -->
+    <dialog id="buy-or-decline-dialog" class="chip-dialog">
+      <h3>You Were Dealt a 4</h3>
+      <p class="dialog-hint" id="buy-or-decline-dialog-text"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-deal-interrupt-decline" title="Decline -- no payment, no extra card">Decline</button>
+        <button type="button" class="btn btn-primary" id="btn-deal-interrupt-buy" title="Buy an extra card">Buy</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Sit Out mid-hand choice dialog. CHANGED 5.1 (§9): context-aware --
+         a non-folded player still gets three options; an already-folded
+         player gets a simplified two-option version (hint/button text
+         swapped via JS, "Sit Out Next Game" hidden). ---- -->
+    <dialog id="sitout-choice-dialog" class="chip-dialog">
+      <h3>Sit Out</h3>
+      <p class="dialog-hint" id="sitout-dialog-hint">You're mid-hand. What would you like to do?</p>
+      <div class="dialog-actions dialog-actions--stack">
+        <button type="button" class="btn btn-secondary" id="btn-sitout-fold" title="Fold this hand and sit out immediately">Fold and Sit Out</button>
+        <button type="button" class="btn btn-secondary" id="btn-sitout-next" title="Finish this hand normally, then sit out">Sit Out Next Game</button>
+        <button type="button" class="btn btn-secondary" id="btn-sitout-cancel" title="Stay in and keep playing">Cancel</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Claim Pot builder (v3.3: proposer's row first, defaults to 100% self-claim, per-row 1/2 & 1/4 fraction buttons) ---- -->
+    <dialog id="claim-pot-dialog" class="chip-dialog">
+      <h3>Claim Pot</h3>
+      <p class="dialog-hint">Pot: $<span id="claim-pot-total">0</span></p>
+      <div class="claim-alloc-list" id="claim-alloc-list"></div>
+      <!-- NEW 8.2 (§6.5): Carry to Next Game -- a single additional row
+           below the player rows, unchecked by default. The dollar amount
+           is always auto-computed/read-only (pot minus whatever's
+           currently checked above), never manually typed -- see
+           updateClaimRemaining() in client.js. -->
+      <div class="claim-carry-row" id="claim-carry-row">
+        <input type="checkbox" id="claim-carry-check" class="claim-carry-check" />
+        <span class="claim-carry-label">Carry to Next Game</span>
+        <span class="claim-carry-amount" id="claim-carry-amount">$0</span>
+      </div>
+      <p class="dialog-remaining" id="claim-remaining">Remaining: $0</p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-claim-dialog-cancel" title="Close without claiming">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-claim-dialog-confirm" disabled title="Propose this claim for approval">Claim</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Game Rules modal (v4.0): browsable index, defaults to the active Game Choice ---- -->
+    <dialog id="rules-dialog" class="chip-dialog rules-dialog">
+      <h3>Game Rules</h3>
+      <div class="rules-index" id="rules-index"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-rules-close" title="Close">Close</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Select Game Choice modal (NEW 4.1): replaces the old inline Dealer's Rail dropdown ---- -->
+    <dialog id="select-dialog" class="chip-dialog">
+      <h3>Select Game Choice</h3>
+      <p class="dialog-hint">Grouped by profile. Opens Options automatically once chosen.</p>
+      <div class="select-index" id="select-index"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-select-close" title="Close without changing the Game Choice">Close</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Options modal: visible to everyone, editable by the Dealer only.
+         CHANGED 4.4: hint text removed, fields use human-readable labels (§10.5) ---- -->
+    <dialog id="options-dialog" class="chip-dialog">
+      <h3>Game Options</h3>
+      <!-- NEW 8.2 (§10.5): static header, above the editable fields --
+           found needed in 8.1 testing, since it's easy to forget which
+           preset is selected (and its rules) by the time Options is
+           reopened mid-session. Shown to every player who opens Options,
+           not just the Dealer. Doesn't change Options' own Start/Close,
+           editable/read-only behavior at all. -->
+      <div class="options-game-header">
+        <p class="options-game-name" id="options-game-name"></p>
+        <button type="button" class="btn btn-secondary btn-small" id="btn-options-rules" title="View this game's rules">Game Rules</button>
+      </div>
+      <div class="game-options-list" id="game-options-list"></div>
+      <!-- NEW 9.2 (§6.10): read-only, shown only under Fixed-Limit --
+           live-recomputed from smallBlind/bigBlind, never independently
+           editable. -->
+      <p class="fixed-limit-bets-display" id="fixed-limit-bets-display" hidden></p>
+      <div class="dialog-actions">
+        <!-- NEW 10.4 (the-cut-spec_v10-4.md Part C): lets the Dealer back
+             out to game selection after opening Options -- previously the
+             only controls here were Start/Close and a Rules link, with no
+             way to change your mind about the picked game. Visible only
+             in the editable (Dealer, idle) state -- see
+             renderOptionsDialogFields()'s own logic. -->
+        <button type="button" class="btn btn-secondary" id="btn-options-cancel" title="Back to game selection">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-options-confirm" title="Close">Close</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Table Owner Tools (NEW 10.4, the-cut-spec_v10-4.md Part A §5):
+         emergency-only recovery functions, creatorId-only. Three
+         sections: Terminate Cleanly / Restore Stacks (one-shot, native
+         confirm() before firing -- destructive, owner-only, not worth a
+         second custom dialog layer), and Pot Distribution (a genuine
+         staged-batch sub-workflow: begin, add/edit/remove entries, live
+         preview, discard/commit). See renderTableOwnerDialog() in
+         client.js. ---- -->
+    <dialog id="table-owner-dialog" class="chip-dialog table-owner-dialog">
+      <h3>Table Owner Tools</h3>
+      <p class="dialog-hint">Emergency recovery only -- not for normal play.</p>
+
+      <section class="to-section">
+        <h4>Terminate Game Cleanly</h4>
+        <p class="to-section-hint">Force-ends the current hand from any phase. The pot is left untouched for later manual handling.</p>
+        <button type="button" class="btn btn-secondary" id="btn-to-terminate" title="Force-end the current hand -- pot untouched">Terminate Game Cleanly</button>
+      </section>
+
+      <section class="to-section">
+        <h4>Restore Player Stacks</h4>
+        <p class="to-section-hint">Resets every stack to the start of the current hand and clears the pot.</p>
+        <button type="button" class="btn btn-secondary" id="btn-to-restore" title="Restore every stack to pre-hand and clear the pot">Restore Player Stacks</button>
+      </section>
+
+      <section class="to-section" id="to-distribution-section">
+        <h4>Distribute Pot</h4>
+        <p class="to-section-hint" id="to-distribution-hint">Stage takes and gives against the pot, then commit them all at once.</p>
+        <button type="button" class="btn btn-secondary" id="btn-to-begin-distribution" title="Start building a pot-distribution batch">Begin Pot Distribution</button>
+
+        <div id="to-distribution-workspace" hidden>
+          <p class="to-preview">
+            Pot now: $<span id="to-preview-pot-now">0</span>
+            &rarr; after batch: $<span id="to-preview-pot-after">0</span>
+          </p>
+          <div class="to-alloc-list" id="to-alloc-list"></div>
+          <div class="to-alloc-form">
+            <select id="to-alloc-player" class="mono-input"></select>
+            <select id="to-alloc-direction" class="mono-input">
+              <option value="take">Take from</option>
+              <option value="give">Give to</option>
+            </select>
+            <input type="number" id="to-alloc-amount" min="1" placeholder="Amount" class="mono-input" />
+            <button type="button" class="btn btn-secondary btn-small" id="btn-to-alloc-add" title="Add this allocation to the batch">Add</button>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="btn btn-secondary" id="btn-to-discard-batch" title="Discard the batch -- nothing real has changed">Discard Batch</button>
+            <button type="button" class="btn btn-primary" id="btn-to-commit-batch" title="Apply the whole batch at once">Commit Batch</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-to-close" title="Close">Close</button>
+      </div>
+    </dialog>
+
+    <!-- ---- About modal (NEW 4.1) ---- -->
+    <dialog id="about-dialog" class="chip-dialog">
+      <h3>About The Cut</h3>
+      <p class="dialog-hint" id="about-body">Loading&hellip;</p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-about-close" title="Close">Close</button>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="/js/railTables.js"></script>
+  <script src="/client.js"></script>
+</body>
+</html>

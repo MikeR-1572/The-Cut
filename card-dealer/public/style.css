@@ -1,0 +1,1564 @@
+:root {
+  --felt-deep: #0e2a20;
+  --felt: #163d2c;
+  --felt-light: #1e4d38;
+  --brass: #c9a35c;
+  --brass-bright: #e8c97e;
+  --ivory: #f3ecd9;
+  --ivory-dim: #b9c2b4;
+  --ink: #1c1712;
+  --suit-red: #b8434f;
+  --danger-bg: #3d1a1a;
+  --danger-text: #f3b9b9;
+  --radius-s: 6px;
+  --radius-m: 12px;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  color: var(--ivory);
+  font-family: var(--font-body);
+  background: var(--felt-deep);
+}
+
+body {
+  position: relative;
+  isolation: isolate;
+}
+
+.felt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -10%, var(--felt-light) 0%, var(--felt) 45%, var(--felt-deep) 100%);
+}
+
+.felt-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  background-image:
+    repeating-linear-gradient(45deg, var(--brass) 0, var(--brass) 1px, transparent 1px, transparent 34px),
+    repeating-linear-gradient(-45deg, var(--brass) 0, var(--brass) 1px, transparent 1px, transparent 34px);
+}
+
+a { color: inherit; }
+
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; }
+
+/* ---------- shared controls ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.83rem;
+  color: var(--ivory-dim);
+  margin-bottom: 12px;
+}
+
+.field-optional {
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: rgba(243, 236, 217, 0.45);
+}
+
+.field input, .field select {
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  padding: 9px 11px;
+  border-radius: var(--radius-s);
+  border: 1px solid rgba(201, 163, 92, 0.35);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ivory);
+}
+
+.field input::placeholder { color: rgba(243, 236, 217, 0.35); }
+.field input:focus, .field select:focus, button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--brass-bright);
+  outline-offset: 2px;
+}
+
+.mono-input { font-family: var(--font-mono); letter-spacing: 0.08em; }
+
+.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.checkbox-field input { width: 16px; height: 16px; accent-color: var(--brass); }
+
+button {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.92rem;
+  border: none;
+  border-radius: var(--radius-s);
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: transform 0.08s ease, filter 0.15s ease;
+}
+button:active { transform: translateY(1px); }
+button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
+
+.btn-primary {
+  background: linear-gradient(180deg, var(--brass-bright), var(--brass));
+  color: #241c0c;
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+.btn-secondary {
+  background: rgba(243, 236, 217, 0.08);
+  color: var(--ivory);
+  border: 1px solid rgba(201, 163, 92, 0.4);
+}
+.btn-secondary:hover:not(:disabled) { background: rgba(243, 236, 217, 0.14); }
+
+.btn-copy {
+  background: transparent;
+  border: 1px solid rgba(201, 163, 92, 0.4);
+  color: var(--brass-bright);
+  padding: 5px 10px;
+  font-size: 0.75rem;
+}
+
+/* NEW 8.1 (§6.9): Kill Hand -- white text on a red background, visually
+   distinct from ordinary New Hand, signaling that clicking it is
+   destructive and hand-specific rather than the routine
+   "nobody opened/nobody claimed" trigger. Applied/removed via
+   classList.toggle alongside .btn-primary in renderPhaseGatedRail --
+   the two are mutually exclusive on the same button (#btn-new-hand),
+   never combined. */
+.btn-kill-hand {
+  background: linear-gradient(180deg, #c0392b, #922b21);
+  color: var(--ivory);
+}
+.btn-kill-hand:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* NEW 9.0 (§6.11): All-In -- visually distinct from an ordinary
+   Bet/Raise/Call, signaling the single highest-stakes, most irreversible
+   click in the app. Warm gold/amber rather than Kill Hand's red (that's
+   destructive-to-the-hand; this is a personal, high-stakes commitment). */
+.btn-allin {
+  background: linear-gradient(180deg, #d68a1f, #a8620f);
+  color: var(--ivory);
+  font-weight: 600;
+}
+.btn-allin:hover:not(:disabled) { filter: brightness(1.12); }
+.btn-allin:disabled { opacity: 0.45; }
+
+/* NEW 9.0 (§6.10): live legal min/max raise readout, next to the bet
+   input -- small and unobtrusive, informational rather than a control. */
+.raise-limits-hint {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--ivory-dim);
+  align-self: center;
+}
+
+/* NEW 8.2 (§6.9): Kill Hand's bottom-of-rail placement -- ~2 blank
+   lines' worth of vertical spacing above it, isolating it from every
+   ordinary rail button above (found in 8.1 testing to sit too close,
+   risking an accidental click given how destructive the action is).
+   Applied to #new-hand-group only while it's re-parented to the end of
+   the rail in kill-hand style (see renderPhaseGatedRail); the group's
+   normal 10px margin (.rail-group) applies the rest of the time. */
+.kill-hand-position { margin-top: 56px; }
+
+/* ---------- layout scaffolding ---------- */
+
+.view { max-width: 980px; margin: 0 auto; padding: 32px 24px 60px; }
+[hidden] { display: none !important; }
+
+/* ---------- lobby ---------- */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.brand-mark {
+  font-size: 2.2rem;
+  color: var(--brass-bright);
+  line-height: 1;
+}
+.brand h1 { font-size: 1.9rem; letter-spacing: 0.01em; }
+.brand-sub { margin: 4px 0 0; color: var(--ivory-dim); font-size: 0.92rem; }
+
+.lobby-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .lobby-grid { grid-template-columns: 1fr; }
+  .lobby-divider { display: none; }
+}
+
+.lobby-card {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(201, 163, 92, 0.25);
+  border-radius: var(--radius-m);
+  padding: 24px;
+}
+.lobby-card h2 { font-size: 1.2rem; margin-bottom: 6px; }
+.hint { color: var(--ivory-dim); font-size: 0.85rem; margin: 0 0 16px; }
+.hint-small { color: var(--ivory-dim); font-size: 0.72rem; margin: 6px 0 0; }
+.lobby-card .btn-primary, .lobby-card .btn-secondary { width: 100%; }
+
+.lobby-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ivory-dim);
+  font-family: var(--font-display);
+  font-style: italic;
+  padding-top: 50px;
+}
+
+.lobby-error {
+  margin-top: 18px;
+  padding: 12px 16px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-radius: var(--radius-s);
+}
+
+/* ---------- table view: constrained to fit a 900x700 browser window
+   without scrolling (spec §10.3, grounded in real side-by-side-with-a-
+   video-call usage, replacing the old arbitrary 1024x768 figure) ---------- */
+
+.view-gametabletop {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 10px 16px;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.table-header {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.table-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.table-id-code {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  letter-spacing: 0.1em;
+  color: var(--brass-bright);
+  flex-shrink: 0;
+}
+.table-name {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  color: var(--ivory);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-status {
+  grid-column: 3;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.deck-label { font-size: 0.72rem; color: var(--ivory-dim); }
+.deck-count { font-family: var(--font-display); font-size: 1.1rem; color: var(--brass-bright); }
+
+/* ---------- Game Rail (NEW/FORMALIZED 4.1): description + Select/Options/Game Rules ---------- */
+
+.game-rail {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 14px;
+  background: rgba(201, 163, 92, 0.1);
+  border: 1px solid rgba(201, 163, 92, 0.25);
+  border-radius: var(--radius-s);
+}
+.game-rail-description {
+  color: var(--brass-bright);
+  font-size: 0.8rem;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.game-rail-buttons {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.game-rail-buttons button {
+  font-size: 0.75rem;
+  padding: 5px 11px;
+}
+
+.table-error {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-radius: var(--radius-s);
+  font-size: 0.85rem;
+}
+
+/* NEW 8.1 (§5.10 extension): the "brief, non-blocking table
+   announcement" spec text calls for on an auto-resolved (Free-price)
+   deal interrupt -- deliberately calm/informational styling (brass on
+   felt-deep), NOT the danger red used for .table-error, since nothing
+   went wrong here; it's a courtesy notice, not a warning. Auto-dismisses
+   via a timer in renderAnnouncement() rather than requiring a click. */
+.table-announcement {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: var(--felt-deep);
+  color: var(--brass-bright);
+  border: 1px solid var(--brass);
+  border-radius: var(--radius-s);
+  font-size: 0.85rem;
+}
+
+/* NEW 9.0 (§6.11): All-In's table-wide notice -- deliberately louder
+   than the routine Baseball-interrupt notice above ("meant to land as a
+   genuine moment, not routine table talk," per spec). Warm gold/amber
+   to match .btn-allin/.seat-allin-badge, bigger and bolder text, a brief
+   pulse to draw the eye -- but still non-blocking and auto-dismissing,
+   same as every other announcement. */
+.table-announcement.is-allin {
+  background: linear-gradient(90deg, rgba(214, 138, 31, 0.14), rgba(214, 138, 31, 0.34), rgba(214, 138, 31, 0.14));
+  color: #f5d9a8;
+  border-color: #d68a1f;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: center;
+  animation: allin-pulse 1.2s ease-in-out 2;
+}
+@keyframes allin-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.015); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .table-announcement.is-allin { animation: none; }
+}
+
+/* NEW 8.2 (§5.10 extension, §6.9): persistent (state-driven) table-wide
+   notice -- Baseball's deal-interrupt notice ("[Name] is deciding
+   whether to Pay/Fold or Buy/Decline") or Kill Hand's "about to kill
+   this hand" notice. Spec calls for styling "similarly to the existing
+   Phase Banner (§10.7)... rather than a modal" -- borrows the Phase
+   Banner's typography (font-display, brass-bright, letter-spacing) but
+   sits in normal document flow like .table-announcement above, not
+   absolutely positioned in the header (that's specific to the Phase
+   Banner's own fixed home). Unlike .table-announcement, this one does
+   NOT auto-dismiss on a timer -- it's purely state-driven
+   (killHandConfirmPending / pendingDealInterrupt), cleared the instant
+   that underlying state clears (the affected decision resolves, or the
+   Dealer confirms/cancels), never before. */
+.table-notice {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: rgba(201, 163, 92, 0.14);
+  border: 1px solid rgba(201, 163, 92, 0.4);
+  border-radius: var(--radius-s);
+  color: var(--brass-bright);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+/* NEW 6.1 (§10.7), fixed 6.2: unified phase banner. CHANGED 6.2 item 6:
+   absolutely positioned relative to the whole .table-header row instead
+   of centered within the grid's middle column -- the grid-column
+   approach drifted whenever the left (code+name) and right (shoe count)
+   content had unequal widths, since the middle column itself wasn't
+   symmetric around the row's true center. Sized to match Table Code/
+   Name (1.15rem, was 0.92rem). Known, accepted tradeoff: on a narrow
+   window with a long table name, this can overlap the left content
+   rather than pushing it aside, since it's no longer part of the grid's
+   layout negotiation. */
+.phase-banner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: max-content;
+  margin: 0;
+  padding: 6px 16px;
+  border-radius: var(--radius-s);
+  color: var(--brass-bright);
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: center;
+  background: transparent;
+  border: 1px solid transparent;
+  z-index: 3;
+  transition: background-color 0.4s ease, color 0.4s ease, border-color 0.4s ease, left 0.4s ease,
+    width 0.4s ease, transform 0.4s ease, padding 0.4s ease;
+}
+
+/* CHANGED 6.2 item 7: during the flash specifically, expands to a
+   full-width, opaque overlay spanning the entire header row --
+   deliberately covering the Table Code/Name and Shoe Count underneath
+   for the flash's duration, not just highlighting a small centered
+   pill. Shrinks back to the normal pill (.phase-banner's own left/
+   width/transform) once the flash ends. Same 0.4s ease as the color
+   transition, for consistency (judgment call, not an explicit spec
+   instruction). */
+.phase-banner--flash {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  transform: none;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  background: var(--brass-bright);
+  border-color: var(--brass-bright);
+  color: var(--felt-deep);
+}
+
+/* Showdown keeps its pre-existing decorated/pulsing resting style,
+   unchanged from 5.0 -- the one phase whose settled state was already
+   special before this banner system existed. */
+.phase-banner--showdown {
+  padding: 6px 16px;
+  background: linear-gradient(90deg, rgba(201, 163, 92, 0.08), rgba(201, 163, 92, 0.28), rgba(201, 163, 92, 0.08));
+  /* CHANGED 7.1: border removed entirely, per Mike's original 6.3
+     request ("remove the trim around the word SHOWDOWN") -- misread at
+     the time as being about the padding overflow (a real, contributing
+     issue, but not the whole request). Gradient background, caps,
+     letter-spacing, and pulse animation all stay; just no outline. */
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  animation: showdown-pulse 1.8s ease-in-out infinite;
+}
+@keyframes showdown-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .phase-banner--showdown { animation: none; }
+}
+
+.claim-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-radius: var(--radius-m);
+  background: rgba(201, 163, 92, 0.14);
+  border: 1px solid rgba(201, 163, 92, 0.4);
+}
+.claim-banner p { margin: 0 0 2px; font-size: 0.88rem; }
+.claim-banner .claim-allocations { font-size: 0.8rem; color: var(--ivory-dim); }
+
+.table-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 190px 1fr 190px;
+  gap: 12px;
+  align-items: stretch;
+  transition: grid-template-columns 0.15s ease; /* NEW 9.3 -- the table visibly shifts/resizes as the rail collapses/expands, not a hard jump */
+}
+/* BUG FIX 9.3 (§10.2): shrinks the LEFT GRID TRACK itself (not just the
+   rail element's own width) so the middle `1fr` track -- the table
+   surface -- actually grows into the reclaimed space. The 9.2 build only
+   ever resized .player-rail internally, which did nothing to the grid's
+   own column sizing; toggled on .table-body (the grid container), not
+   .player-rail, for exactly that reason. */
+.table-body.rail-collapsed {
+  grid-template-columns: 40px 1fr 190px;
+}
+@media (max-width: 860px) {
+  .view-gametabletop { height: auto; overflow: visible; }
+  .table-body { grid-template-columns: 1fr; }
+}
+
+/* ---------- oval table surface ---------- */
+
+.gametabletop-surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
+}
+
+.oval-surface {
+  position: absolute;
+  inset: 5% 6% 11% 6%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, var(--felt-light) 0%, var(--felt) 70%, var(--felt-deep) 100%);
+  border: 1px solid rgba(201, 163, 92, 0.3);
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.45), 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.seats {
+  position: absolute;
+  inset: 0;
+}
+
+.community-cards {
+  position: absolute;
+  left: 50%;
+  top: calc(47% + 27px);
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 4px;
+  padding-left: 14px; /* room for the fan's negative-margin overlap */
+  z-index: 2;
+}
+.community-cards:empty { display: none; }
+.community-cards .card { margin-left: -14px; }
+.community-cards .card:first-child { margin-left: 0; }
+
+.pot-display {
+  position: absolute;
+  left: 50%;
+  top: calc(30% + 27px);
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  border-radius: var(--radius-m);
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(201, 163, 92, 0.35);
+  z-index: 2;
+}
+.pot-amount { font-family: var(--font-display); font-size: 1.6rem; color: var(--brass-bright); }
+.btn-claim { padding: 5px 12px; font-size: 0.75rem; }
+
+/* NEW 9.0 (§6.10): horizontal row of pot tiers, replacing the single
+   .pot-amount figure once side pots exist. Ordinary hands never show
+   this -- the row starts hidden (see index.html). */
+.pots-row {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.pot-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 10px;
+  border-radius: var(--radius-s, 6px);
+  border: 1px solid rgba(201, 163, 92, 0.35);
+  background: rgba(0, 0, 0, 0.2);
+}
+.pot-chip-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ivory-dim);
+}
+.pot-chip-amount {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--brass-bright);
+}
+/* Currently claimable: the live propose->approve->banner flow can run
+   against this pot right now (Last-Pot-First). */
+.pot-chip.is-claimable {
+  border-color: var(--brass-bright);
+  box-shadow: 0 0 0 1px rgba(201, 163, 92, 0.4);
+}
+/* Claimed: resolved, left visible for the hand's full resolution history. */
+.pot-chip.is-claimed {
+  opacity: 0.5;
+}
+.pot-chip.is-claimed .pot-chip-amount { color: var(--ivory-dim); }
+
+/* Each seat is placed by inline left/top (%) computed in client.js from
+   the oval's parametric equation, then centered on that point. */
+.seat {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 148px;
+}
+
+.seat-info {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(201, 163, 92, 0.25);
+  max-width: 100%;
+}
+.seat.is-turn .seat-info {
+  border-color: var(--brass-bright);
+  box-shadow: 0 0 0 1px var(--brass-bright), 0 0 14px rgba(232, 201, 126, 0.35);
+}
+.seat.is-you .seat-info { background: rgba(0, 0, 0, 0.48); }
+
+/* v4.2 §10.2: the avatar is gone (purely decorative, no function). The
+   Dealer marker now occupies that same slot in the seat-info row --
+   content only for the Dealer's own seat; every other seat gets an
+   empty spacer of the same size so the row stays visually aligned. */
+.seat-dealer-marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: var(--font-display);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.seat-dealer-marker.is-dealer {
+  /* CHANGED 9.6 (§10.2): black text on white background -- matches the
+     real-world physical dealer-button convention. Not specified
+     visually before this release; the previous brass/gold treatment
+     was an arbitrary choice, not a deliberate design decision being
+     overridden. */
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), inset 0 0 0 1.5px rgba(0, 0, 0, 0.15);
+}
+.seat-name {
+  font-weight: 600;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 80px;
+}
+.seat-chips {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--brass-bright);
+  flex-shrink: 0;
+}
+.seat-folded-badge {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ivory-dim);
+  border: 1px solid rgba(185, 194, 180, 0.4);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+/* NEW 10.0 (the-cut-spec_v10-0.md §4.1): a distinct color from
+   .seat-folded-badge (dusty rose vs. neutral grey) so it reads as its
+   own reason at a glance, even though the seat's overall dimming
+   (.is-lost-side-pot above) matches .is-folded exactly. */
+.seat-lost-pot-badge {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #d9b8b8;
+  background: rgba(185, 120, 120, 0.16);
+  border: 1px solid rgba(185, 120, 120, 0.4);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.seat-sitting-out-badge {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ivory-dim);
+  background: rgba(185, 194, 180, 0.16);
+  border: 1px solid rgba(185, 194, 180, 0.4);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+/* NEW 9.0 (§3, §6.11): persistent, distinct from Folded/Sitting Out --
+   warm gold to match .btn-allin, signaling "still live, out of chips." */
+.seat-allin-badge {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #f5d9a8;
+  background: rgba(214, 138, 31, 0.22);
+  border: 1px solid rgba(214, 138, 31, 0.55);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.seat-ante-badge {
+  font-size: 0.58rem;
+  color: var(--danger-text);
+  border: 1px solid rgba(243, 185, 185, 0.4);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.seat.is-folded,
+.seat.is-lost-side-pot,
+.seat.is-sitting-out { opacity: 0.55; }
+.seat.is-folded .card-back,
+.seat.is-lost-side-pot .card-back,
+.seat.is-sitting-out .card-back { filter: grayscale(0.4); }
+
+.seat-buyin {
+  font-size: 0.58rem;
+  color: var(--ivory-dim);
+  text-align: center;
+}
+
+.seat-show-cards {
+  font-size: 0.58rem;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid rgba(201, 163, 92, 0.5);
+  color: var(--brass-bright);
+  flex-shrink: 0;
+}
+.seat-show-cards:hover { background: rgba(201, 163, 92, 0.15); }
+.seat-revealed-badge {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--felt-deep);
+  background: var(--ivory-dim);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.seat-hand {
+  display: flex;
+  justify-content: center;
+  padding-left: 16px; /* room for the fan's leftward tilt / negative margins */
+  min-height: 0;
+}
+
+/* Discard pile visual (v4.1 §10.5): a small face-down muck, visually
+   separated from the cards a player kept -- count only, never identity. */
+.seat-muck {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.seat-muck:empty { display: none; }
+.seat-muck-cards {
+  position: relative;
+  display: flex;
+}
+.seat-muck-cards .card-back {
+  width: 20px;
+  height: 28px;
+  margin-left: -14px;
+  opacity: 0.75;
+}
+.seat-muck-cards .card-back:first-child { margin-left: 0; }
+.seat-muck-count {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--ivory-dim);
+}
+
+/* NEW 5.0 (§5.7): "Stand Pat" declaration -- same slot as the muck pile
+   above, but text only, since there's no card count to show. */
+.seat-muck.seat-stand-pat {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--brass-bright);
+  text-transform: uppercase;
+}
+
+/* NEW 8.2 (§5.11): Declare's own label -- same seat-status-indicator
+   treatment family as .seat-stand-pat above (a sibling slot, not the
+   same one -- a player could in principle Stand Pat in one hand and
+   Declare in a later one, never both at once in practice today, but
+   there's no reason to force them to share one element). Empty when
+   there's no declaration to show (blank, not "Undeclared") -- :empty
+   collapses it out of the seat's layout entirely, same as .seat-muck. */
+.seat-declaration {
+  margin-top: 2px;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--brass-bright);
+}
+.seat-declaration:empty { display: none; }
+
+/* Shared burn pile (v4.2 §5.5) -- same face-down muck-pile pattern as
+   seat discards, but a single pile for the whole table, not per-seat. */
+.burn-pile {
+  position: absolute;
+  left: 14%;
+  top: 16%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  z-index: 2;
+}
+.burn-pile:empty { display: none; }
+.burn-pile-cards {
+  position: relative;
+  display: flex;
+}
+.burn-pile-cards .card-back {
+  width: 22px;
+  height: 31px;
+  margin-left: -15px;
+  opacity: 0.75;
+}
+.burn-pile-cards .card-back:first-child { margin-left: 0; }
+.burn-pile-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--ivory-dim);
+}
+
+/* Rabbit Hunt reveal area (v4.3 §5.6/§10.9) -- real face-up cards (via
+   the normal .card renderer), clearly separated from community cards
+   and any hand by position + a dashed "what-if" border, since these
+   were never actually in play. */
+.rabbit-hunt-cards {
+  position: absolute;
+  left: 86%;
+  top: 16%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 6px 18px;
+  border: 1px dashed rgba(232, 201, 126, 0.5);
+  border-radius: var(--radius-s);
+  z-index: 2;
+}
+.rabbit-hunt-cards:empty { display: none; }
+.rabbit-hunt-cards .card { width: 30px; height: 43px; margin-left: -14px; }
+.rabbit-hunt-cards .card:first-child { margin-left: 0; }
+
+/* playing card, drawn entirely in CSS -- no external art assets */
+.card,
+.card-back {
+  --tilt: 0deg;
+  width: 38px;
+  height: 54px;
+  margin-left: -18px;
+  border-radius: 5px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  transform: rotate(var(--tilt));
+  transform-origin: bottom center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  flex-shrink: 0;
+}
+.card:first-child,
+.card-back:first-child { margin-left: 0; }
+.card:hover,
+.card-back:hover { transform: rotate(var(--tilt)) translateY(-9px); z-index: 5; }
+
+.card {
+  background: var(--ivory);
+  color: var(--ink);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 3px 4px;
+  font-family: var(--font-display);
+}
+.card.is-red { color: var(--suit-red); }
+
+/* v4.0: this specific card is visible to everyone at the table (a Stud
+   up-card, or your own card dealt face-up), distinct from "you can see
+   it because it's your hand" -- a thin brass edge signals that.
+   CONTRAST FIX 7.1: was --brass-bright (#e8c97e) against the card's own
+   --ivory background (#f3ecd9) -- both pale, warm, similarly-light
+   tones, nearly invisible in practice. Switched to the darker, more
+   saturated --brass, thickened from 1.5px to 2px. */
+.card--public { box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4), inset 0 0 0 2px var(--brass); }
+
+/* NEW 7.1, REVISED 7.2 (§10.2): the mirror marker -- any currently-
+   visible card that WAS dealt face-down (a Stud hole card, viewed in
+   your own hand or revealed at Showdown) gets its own distinct
+   treatment, deliberately different from the public marker so the two
+   read as a real system rather than a brighter/dimmer variant of one
+   idea. Draw/Hold'em never trigger this (their cards are uniformly "all
+   down"/"all down but the owner"), so it's effectively Stud-only in
+   practice.
+   REVISED 7.2, found too subtle in play-testing: the original dashed
+   --ink border wasn't obvious enough at a glance. Replaced with a solid
+   dot in the bottom-left corner -- the one corner left empty since the
+   corner-index suit glyph was dropped in 6.2 -- filled with
+   --felt-deep, the darker anchor tone of the card-back gradient itself,
+   so the marker reads as "the same color as a face-down card" rather
+   than an arbitrary new color. No box-shadow/outline treatment anymore;
+   the public marker (edge treatment) is unaffected by this change.
+   SIZED UP 8.0 (ARCHITECTURE_v8.md §7 item 3): still found a bit small
+   even after the 7.2 dot revision -- 7px/9px -> 8px/11px (a straight
+   20% increase, rounded to whole pixels for consistent cross-browser
+   rendering; 7*1.2=8.4->8, 9*1.2=10.8->11). Position offsets (left/bottom)
+   left unchanged -- only the dot's own diameter grows. */
+.card--down { box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4); }
+.card--down::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--felt-deep);
+}
+/* 11px on the viewer's own hand's larger cards (48x68px vs. 38x54px),
+   proportioned relative to the larger corner rank text next to it. */
+.seat.is-you .card--down::after { width: 11px; height: 11px; left: 5px; bottom: 5px; }
+
+/* selectable for Discard (spec §5.1) -- own hand only, click to toggle */
+.card.is-selectable { cursor: pointer; }
+.card.is-selected-discard {
+  outline: 2px solid var(--danger-text);
+  outline-offset: 1px;
+  transform: rotate(var(--tilt)) translateY(-9px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.card-index { font-size: 0.81rem; font-weight: 700; line-height: 1; display: flex; flex-direction: column; align-items: center; }
+.card-index.bottom { align-self: flex-end; transform: rotate(180deg); }
+.card-suit-glyph { font-size: 1.38rem; align-self: center; }
+
+/* face-down card, for every seat that isn't the viewer's own */
+.card-back {
+  position: relative;
+  background: linear-gradient(135deg, var(--felt-light), var(--felt-deep));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.card-back::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(201, 163, 92, 0.5);
+  border-radius: 4px;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(201, 163, 92, 0.16) 0,
+    rgba(201, 163, 92, 0.16) 2px,
+    transparent 2px,
+    transparent 8px
+  );
+}
+.card-back-mark {
+  position: relative;
+  color: var(--brass-bright);
+  font-size: 0.85rem;
+}
+
+/* the viewer's own seat gets slightly larger, easier-to-read cards */
+.seat.is-you .card { width: 48px; height: 68px; margin-left: -20px; }
+.seat.is-you .card-index { font-size: 0.96rem; }
+.seat.is-you .card-suit-glyph { font-size: 1.73rem; }
+.seat.is-you .seat-name { max-width: 130px; }
+.seat.is-you .seat-hand:empty::before {
+  content: "No cards yet \2014 wait for the Dealer.";
+  color: var(--ivory-dim);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .gametabletop-surface { height: auto; min-height: 320px; }
+  .oval-surface { display: none; }
+  .seats {
+    position: static !important;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .seat {
+    position: static !important;
+    transform: none !important;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 6px;
+    column-gap: 10px;
+  }
+  .seat-name { max-width: none; }
+  .seat.is-you .seat-name { max-width: none; }
+  .seat-hand { padding-left: 0; justify-content: flex-start; }
+  .pot-display {
+    position: static !important;
+    transform: none !important;
+    width: 100%;
+    margin-bottom: 12px;
+  }
+  .community-cards {
+    position: static !important;
+    transform: none !important;
+    width: 100%;
+    justify-content: center;
+    margin-bottom: 12px;
+    padding-left: 0;
+  }
+  .burn-pile {
+    position: static !important;
+    transform: none !important;
+    margin-bottom: 12px;
+  }
+  .rabbit-hunt-cards {
+    position: static !important;
+    transform: none !important;
+    margin-bottom: 12px;
+    padding-left: 8px;
+  }
+}
+
+/* ---------- dealer rail / player rail ---------- */
+
+.dealer-rail,
+.player-rail {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(201, 163, 92, 0.3);
+  border-radius: var(--radius-m);
+  padding: 14px;
+  align-self: start;
+  max-height: 100%;
+  overflow-y: auto;
+  position: relative; /* NEW 9.2 -- anchors the toggle tab */
+  transition: width 0.15s ease, padding 0.15s ease;
+}
+/* NEW 9.2 (§10.2): collapsed state shows nothing -- no partial "peek"
+   content, since chip total is already visible at the seat itself. */
+.player-rail.is-collapsed {
+  width: 40px;
+  padding: 14px 4px;
+  overflow: hidden;
+}
+.player-rail.is-collapsed .player-rail-content {
+  display: none;
+}
+/* A small, permanently visible tab/arrow control -- present regardless
+   of collapsed/expanded state, a self-evident standard affordance. */
+.player-rail-toggle {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(201, 163, 92, 0.4);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--brass-bright);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.player-rail.is-collapsed .player-rail-toggle {
+  position: static;
+  margin: 0 auto;
+}
+.player-rail-toggle:hover { filter: brightness(1.2); }
+/* One-time hint, clears on first click or first hand -- a subtle pulse
+   rather than a persistent, potentially-annoying tooltip. */
+.player-rail-toggle.has-hint {
+  animation: rail-toggle-hint-pulse 1.6s ease-in-out infinite;
+}
+@keyframes rail-toggle-hint-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 163, 92, 0.5); }
+  50% { box-shadow: 0 0 0 5px rgba(201, 163, 92, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-rail-toggle.has-hint { animation: none; }
+}
+
+.dealer-rail h2,
+.player-rail h2 { font-size: 0.95rem; margin-bottom: 10px; color: var(--brass-bright); }
+.rail-group { margin-bottom: 10px; }
+.rail-group:last-child { margin-bottom: 0; }
+.rail-row { display: flex; gap: 6px; }
+.rail-row input, .rail-row select { flex: 1; min-width: 0; }
+.rail-row button { flex-shrink: 0; }
+.rail-group .btn-secondary { flex: 1; }
+.rail-group button { font-size: 0.85rem; padding: 8px 12px; }
+.ante-amount-input { max-width: 64px; flex: 0 0 64px; }
+
+/* Demoted Buy Chips + About row (v5.0 §10.2) -- initial buy-in is now
+   automated via Suggested Buy-In (4.5), so a subsequent manual top-up is
+   expected to be rare; this pairing reflects that with smaller buttons. */
+.rail-row--secondary { margin-top: 4px; }
+.rail-group .btn-small {
+  font-size: 0.74rem;
+  padding: 6px 8px;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--ivory-dim);
+  margin-bottom: 6px;
+}
+
+/* NEW 7.2 (§6.8): purely informational text above Select Opening Bettor,
+   reminding the Dealer which manual rule applies to the current street --
+   distinct from .field-label (smaller, italic, no margin-bottom of its
+   own since it sits between the label and the dropdown). */
+.rail-hint {
+  display: block;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--ivory-dim);
+  margin: -2px 0 6px;
+}
+
+/* Draw-profile Dealer's Rail dividers (v4.4 §10.8, replacing the 4.3
+   gold text headings) -- only shown when profile === 'draw'; other
+   profiles keep the flat, unlabeled list. Plain visual separation, no text. */
+.rail-divider {
+  height: 1px;
+  margin: 14px 0;
+  background: rgba(201, 163, 92, 0.2);
+}
+.rail-divider:first-child { margin-top: 0; }
+
+/* Rabbit Hunt (v4.3 §5.6/§10.9) -- rare, time-limited action, given a
+   brass accent so it stands out when it appears. */
+#rabbit-hunt-group { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid rgba(201, 163, 92, 0.25); }
+#btn-rabbit-hunt { width: 100%; }
+
+/* Redeal (v4.4 §5.7) -- takes the place of the regular Deal control at
+   the exact moment it's available; same visual weight as Rabbit Hunt. */
+#redeal-group { margin-bottom: 14px; }
+#btn-redeal { width: 100%; }
+
+/* ---------- Game Choice / options editor (v4.0) ---------- */
+
+/* NEW 8.2 (§10.5): static header above the editable option fields --
+   Game Name (plain display, reflects whatever preset is active) + a
+   Game Rules trigger, opening the same modal the Game Rail's own
+   button already opens. */
+.options-game-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(201, 163, 92, 0.25);
+}
+.options-game-name {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--brass-bright);
+  margin: 0;
+}
+
+.game-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* NEW 9.2 (§6.10): read-only Small Bet/Big Bet figures, Fixed-Limit only */
+.fixed-limit-bets-display {
+  font-size: 0.82rem;
+  color: var(--ivory-dim);
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(201, 163, 92, 0.2);
+}
+.game-option-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+.game-option-key {
+  font-size: 0.72rem;
+  color: var(--ivory-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.game-option-row input,
+.game-option-row select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+}
+
+#deal-target-count,
+#deal-community-count {
+  max-width: 70px;
+  flex: 0 0 70px;
+}
+
+.own-chip-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.own-chip-total { font-family: var(--font-display); font-size: 1.25rem; color: var(--brass-bright); }
+.own-chip-buyin { font-size: 0.72rem; color: var(--ivory-dim); }
+
+select {
+  font-family: var(--font-body);
+  padding: 8px;
+  font-size: 0.85rem;
+  border-radius: var(--radius-s);
+  border: 1px solid rgba(201, 163, 92, 0.35);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ivory);
+}
+
+/* ---------- Betting Rail (shared status + personal eligible actions) ---------- */
+
+.betting-rail {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-m);
+  background: rgba(201, 163, 92, 0.14);
+  border: 1px solid rgba(201, 163, 92, 0.4);
+}
+.betting-rail-shared {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  color: var(--brass-bright);
+}
+/* NEW 9.2 (§6.10): persistent for the rest of the betting round, once
+   true -- deliberately styled as a standing state indicator, not a
+   one-shot toast (unlike the All-In/refund/Baseball table notices). */
+.raise-cap-indicator {
+  font-size: 0.8rem;
+  color: var(--ivory-dim);
+  margin-top: 2px;
+  font-style: italic;
+}
+.betting-rail-personal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.personal-turn-actions,
+.personal-fold-action,
+.personal-ante-action,
+.personal-discard-action,
+.personal-declare-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.personal-action-label { font-size: 0.8rem; color: var(--ivory-dim); }
+#bet-amount { width: 100px; }
+
+@media (max-width: 560px) {
+  .betting-rail-personal { flex-direction: column; align-items: stretch; }
+  .personal-turn-actions,
+  .personal-fold-action,
+  .personal-ante-action,
+  .personal-discard-action,
+  .personal-declare-action { flex-direction: column; align-items: stretch; }
+  #bet-amount { width: 100%; }
+}
+
+/* ---------- Buy Chips / Sit Out / Claim Pot dialogs ---------- */
+
+.chip-dialog {
+  border: 1px solid rgba(201, 163, 92, 0.4);
+  border-radius: var(--radius-m);
+  background: var(--felt-deep);
+  color: var(--ivory);
+  padding: 20px;
+  width: min(440px, 90vw);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.chip-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.chip-dialog h3 { font-size: 1.15rem; color: var(--brass-bright); margin-bottom: 12px; }
+
+/* NEW 9.6 (§10.4.2): every dialog's own <h3> title doubles as its
+   drag-handle -- a dedicated strip, not the dialog body, so a drag
+   gesture can never be triggered by clicking a button or field inside.
+   touch-action: none prevents the browser's own touch-scroll gesture
+   from fighting the pointer-drag tracking on touch devices. */
+.dialog-drag-handle {
+  cursor: move;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  padding: 2px 0;
+  margin: -2px 0 10px;
+  border-radius: 4px;
+}
+.dialog-drag-handle:hover { background: rgba(201, 163, 92, 0.08); }
+
+.dialog-hint { font-size: 0.8rem; color: var(--ivory-dim); margin: 0 0 10px; }
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+.dialog-actions--stack {
+  flex-direction: column;
+  align-items: stretch;
+  margin-top: 6px;
+}
+.dialog-actions--stack button { width: 100%; }
+
+/* ---------- Game Rules modal (v4.0) ---------- */
+
+.rules-dialog { width: min(560px, 92vw); }
+.rules-index { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow-y: auto; }
+.rules-entry {
+  padding: 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid rgba(201, 163, 92, 0.2);
+  scroll-margin-top: 12px;
+}
+.rules-entry.is-active {
+  border-color: var(--brass-bright);
+  background: rgba(201, 163, 92, 0.1);
+}
+.rules-entry h4 {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--brass-bright);
+  margin: 0 0 4px;
+}
+.rules-entry-profile {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ivory-dim);
+  margin: 0 0 6px;
+}
+.rules-entry p { margin: 0; font-size: 0.85rem; line-height: 1.5; color: var(--ivory); white-space: pre-line; }
+
+/* ---------- Select Game Choice modal (NEW 4.1) ---------- */
+
+/* CHANGED 7.1 (§10.4.1): tightened gap 4px -> 2px, directly answering
+   Mike's request to reduce visual spacing between entries, and further
+   reducing (though not structurally eliminating) the residual
+   double-scrollbar case for Stud's 10-preset list. */
+.select-index { display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow-y: auto; }
+.select-group-label {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ivory-dim);
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(201, 163, 92, 0.2);
+  padding: 8px 2px 6px;
+  margin: 2px 0 0;
+  cursor: pointer;
+}
+.select-group-label:hover { color: var(--brass-bright); }
+.select-group-label::after {
+  content: '\25B8'; /* small right-pointing triangle, rotates when expanded */
+  font-size: 0.7rem;
+  transition: transform 0.2s ease;
+}
+.select-group-label.is-expanded::after { transform: rotate(90deg); }
+/* CHANGED 7.1: gap 8px -> 4px, same reasoning as .select-index above. */
+.select-group-list { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; }
+.select-entry {
+  width: 100%;
+  text-align: left;
+  padding: 5px 12px; /* CHANGED 7.1 (§10.4.1): 8px -> 5px vertical, tightens per-item height across the board */
+  border-radius: var(--radius-s);
+  border: 1px solid rgba(201, 163, 92, 0.25);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ivory);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.select-entry:hover { background: rgba(201, 163, 92, 0.14); }
+.select-entry.is-active { border-color: var(--brass-bright); background: rgba(201, 163, 92, 0.14); }
+
+/* ---------- About modal (NEW 4.1) ---------- */
+
+#about-dialog { width: min(320px, 90vw); }
+#about-body { line-height: 1.7; }
+
+.dialog-remaining {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--ivory-dim);
+  margin: 12px 0 0;
+}
+.dialog-remaining.is-zero { color: var(--brass-bright); font-weight: 600; }
+
+/* ---------- Claim Pot builder ---------- */
+
+.claim-alloc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.claim-alloc-row {
+  display: grid;
+  grid-template-columns: auto 1fr 80px auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(201, 163, 92, 0.15);
+}
+.claim-alloc-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--brass); }
+.claim-alloc-name { font-size: 0.9rem; }
+.claim-alloc-amount { width: 100%; padding: 6px; text-align: right; }
+.claim-alloc-fracs { display: flex; gap: 4px; }
+.claim-alloc-frac { font-size: 0.68rem; padding: 5px 8px; flex-shrink: 0; }
+
+/* NEW 8.2 (§6.5): Carry to Next Game -- same row shape as the player
+   allocation rows above, but simpler (no fraction buttons, and the
+   dollar amount is read-only display text, never an editable input --
+   it's always auto-computed, per spec). Sits directly below
+   .claim-alloc-list, above the shared Remaining indicator. */
+.claim-carry-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+  margin-top: 4px;
+  border-top: 1px dashed rgba(201, 163, 92, 0.3);
+}
+.claim-carry-check { width: 16px; height: 16px; accent-color: var(--brass); }
+.claim-carry-label { font-size: 0.9rem; color: var(--ivory-dim); }
+.claim-carry-amount { font-family: var(--font-mono); font-size: 0.9rem; text-align: right; color: var(--ivory); }
+
+/* ---------- Table Owner Tools (NEW 10.4, the-cut-spec_v10-4.md Part A §5) ---------- */
+
+.table-owner-dialog { width: min(480px, 92vw); }
+
+.to-section {
+  padding: 12px 0;
+  border-top: 1px solid rgba(201, 163, 92, 0.15);
+}
+.to-section:first-of-type { border-top: none; padding-top: 4px; }
+.to-section h4 {
+  font-size: 0.85rem;
+  color: var(--brass-bright);
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.to-section-hint {
+  font-size: 0.78rem;
+  color: var(--ivory-dim);
+  margin: 0 0 8px;
+}
+
+.to-preview {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  color: var(--ivory);
+  margin: 4px 0 10px;
+}
+
+.to-alloc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.to-alloc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(201, 163, 92, 0.12);
+  font-size: 0.85rem;
+}
+.to-alloc-empty {
+  font-size: 0.8rem;
+  color: var(--ivory-dim);
+  font-style: italic;
+  margin: 0 0 10px;
+}
+
+.to-alloc-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 90px auto;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.to-alloc-form select,
+.to-alloc-form input { padding: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

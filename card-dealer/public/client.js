@@ -34,6 +34,7 @@
     appInfo: null, // fetched once from /app-info.json (v4.1, About button)
     pendingAutoOpenOptions: false, // v4.1: Select auto-opens Options once the new gameChoiceId lands
     wasShowingTurnActions: false, // NEW 5.1 (bug fix) -- edge-triggered Bet/Raise box clearing; see renderBettingRail
+    myReconnectCode: null, // NEW 11.0 (Part D) -- this Player's own code, shown so they don't have to ask the Table Owner
   };
 
   // ---- DOM refs ----
@@ -50,6 +51,11 @@
     joinCode: document.getElementById('join-code'),
     joinName: document.getElementById('join-name'),
     btnJoinGameTable: document.getElementById('btn-join-game-table'),
+
+    // NEW 11.0 (Part D)
+    rejoinCode: document.getElementById('rejoin-code'),
+    rejoinTableCode: document.getElementById('rejoin-table-code'),
+    btnRejoinGameTable: document.getElementById('btn-rejoin-game-table'),
 
     tableNameDisplay: document.getElementById('table-name-display'),
     gameTableCodeDisplay: document.getElementById('game-table-code-display'),
@@ -122,8 +128,23 @@
     tableBody: document.getElementById('table-body'), // NEW 9.3 -- needed so the collapse toggle can actually resize the grid track, not just the rail's own content
     btnPlayerRailToggle: document.getElementById('btn-player-rail-toggle'), // BUG FIX 9.3 -- was assigned as el.playerRailToggle but used everywhere as el.btnPlayerRailToggle, leaving the real property undefined; .addEventListener on it threw at page load, before Create/Join Room's own listeners ever attached, breaking the entire landing page
     ownChipReadout: document.getElementById('own-chip-readout'),
+    ownReconnectCodeReadout: document.getElementById('own-reconnect-code-readout'), // NEW 11.0 (Part D)
     btnOpenBuyDialog: document.getElementById('btn-open-buy-dialog'),
     btnSitToggle: document.getElementById('btn-sit-toggle'),
+
+    // NEW 11.0 (Part F.1)
+    btnLeaveTable: document.getElementById('btn-leave-table'),
+    leaveTableDialog: document.getElementById('leave-table-choice-dialog'),
+    leaveTableDialogHint: document.getElementById('leave-table-dialog-hint'),
+    btnLeaveFold: document.getElementById('btn-leave-fold'),
+    btnLeaveAtCycleClose: document.getElementById('btn-leave-at-cycle-close'),
+    btnLeaveCancel: document.getElementById('btn-leave-cancel'),
+
+    // NEW 11.0 (Part H.2)
+    inactivityBanner: document.getElementById('inactivity-banner'),
+    inactivityPopup: document.getElementById('inactivity-popup'),
+    inactivityPopupHint: document.getElementById('inactivity-popup-hint'),
+    btnRestartActivityClock: document.getElementById('btn-restart-activity-clock'),
     btnOpenAboutDialog: document.getElementById('btn-open-about-dialog'),
 
     buyDialog: document.getElementById('buy-chips-dialog'),
@@ -133,6 +154,8 @@
 
     // NEW 10.4 (the-cut-spec_v10-4.md Part A §5): Table Owner Tools.
     tableOwnerRailGroup: document.getElementById('table-owner-rail-group'),
+    tableOwnerSectionDivider: document.getElementById('table-owner-section-divider'), // FIXED (11.0 review finding #2)
+    tableOwnerSectionLabel: document.getElementById('table-owner-section-label'),
     btnOpenTableOwnerDialog: document.getElementById('btn-open-table-owner-dialog'),
     tableOwnerDialog: document.getElementById('table-owner-dialog'),
     btnToTerminate: document.getElementById('btn-to-terminate'),
@@ -151,6 +174,19 @@
     btnToDiscardBatch: document.getElementById('btn-to-discard-batch'),
     btnToCommitBatch: document.getElementById('btn-to-commit-batch'),
     btnToClose: document.getElementById('btn-to-close'),
+
+    // NEW 11.0 (Part F.2/F.6)
+    toRemovePlayerSelect: document.getElementById('to-remove-player'),
+    btnToRemovePlayer: document.getElementById('btn-to-remove-player'),
+    btnToEndGame: document.getElementById('btn-to-end-game'),
+
+    // NEW 11.0 (Part B/D): Table Owner Settings.
+    btnOpenSettingsDialog: document.getElementById('btn-open-settings-dialog'),
+    settingsDialog: document.getElementById('settings-dialog'),
+    settingsReconnectTimeout: document.getElementById('settings-reconnect-timeout'),
+    btnSettingsSaveTimeout: document.getElementById('btn-settings-save-timeout'),
+    settingsReconnectCodes: document.getElementById('settings-reconnect-codes'),
+    btnSettingsClose: document.getElementById('btn-settings-close'),
 
     suggestedBuyinDialog: document.getElementById('suggested-buyin-dialog'),
     suggestedBuyinInput: document.getElementById('suggested-buyin-input'),
@@ -247,6 +283,17 @@
     const ws = new WebSocket(`${protocol}//${location.host}`);
     state.ws = ws;
 
+    ws.addEventListener('open', () => {
+      // NEW 11.0 (Part D): safe to auto-submit only once the socket is
+      // actually open -- send() silently no-ops otherwise. Fields are
+      // pre-filled at page load by maybeAutoFillRejoinFromUrl() below;
+      // this just performs the actual submit once there's a live socket.
+      if (state.autoRejoinPending) {
+        state.autoRejoinPending = false;
+        el.btnRejoinGameTable.click();
+      }
+    });
+
     ws.addEventListener('message', (event) => {
       let msg;
       try {
@@ -277,6 +324,7 @@
       case 'joined':
         state.playerId = msg.playerId;
         state.gameTableCode = msg.gameTableCode;
+        state.myReconnectCode = msg.reconnectCode; // NEW 11.0 (Part D)
         showTableView();
         break;
       case 'gameTableState': {
@@ -290,6 +338,17 @@
       }
       case 'joinError':
         showLobbyError(msg.message);
+        break;
+      case 'reconnectError': // NEW 11.0 (Part D)
+        showLobbyError(msg.message);
+        break;
+      case 'leftTable': // NEW 11.0 (Part F.1/F.2)
+        showTableError('You left the table. Returning to the lobby\u2026');
+        setTimeout(() => window.location.href = '/', 1500);
+        break;
+      case 'tableEnded': // NEW 11.0 (Part F.6/H.2)
+        showTableError(msg.message || 'This table has ended. Returning to the lobby\u2026');
+        setTimeout(() => window.location.href = '/', 1500);
         break;
       case 'dealError':
         showTableError(msg.message);
@@ -524,6 +583,37 @@
     }
     send('joinGameTable', { gameTableCode: code, playerName: el.joinName.value });
   });
+
+  // NEW 11.0 (Part D): the "Re-Join a Table" path -- same wire message
+  // whether the code came from typing here or from a `?rejoin=` URL
+  // param (see maybeAutoFillRejoinFromUrl() below).
+  el.btnRejoinGameTable.addEventListener('click', () => {
+    hideLobbyError();
+    const code = el.rejoinCode.value.trim();
+    const tableCode = el.rejoinTableCode.value.trim();
+    if (!code || !tableCode) {
+      showLobbyError('Enter both your reconnect code and the table code.');
+      return;
+    }
+    send('reconnectToGameTable', { gameTableCode: tableCode, code });
+  });
+
+  /**
+   * NEW 11.0 (Part D): a secondary convenience for anyone who bookmarked
+   * or texted themselves a direct link -- `?rejoin=CODE&table=TABLECODE`,
+   * read once on page load. Both entry methods check the same code
+   * server-side; this just pre-fills (and auto-submits) the same form
+   * the person could otherwise type into by hand.
+   */
+  function maybeAutoFillRejoinFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('rejoin');
+    const tableCode = params.get('table');
+    if (!code) return;
+    el.rejoinCode.value = code.trim().toUpperCase();
+    if (tableCode) el.rejoinTableCode.value = tableCode.trim().toUpperCase();
+    if (code && tableCode) state.autoRejoinPending = true; // submitted once the socket opens -- see connect()
+  }
 
   [el.createName, el.joinCode, el.joinName].forEach((input) => {
     input.addEventListener('keydown', (e) => {
@@ -990,6 +1080,33 @@
   });
   el.btnSitoutCancel.addEventListener('click', () => el.sitoutDialog.close());
 
+  // ---- Leave Table (NEW 11.0, the-cut-spec_v11-0.md Part F.1) ----
+
+  el.btnLeaveTable.addEventListener('click', () => {
+    hideTableError();
+    const me = state.lastGameTable?.players.find((p) => p.id === state.playerId);
+    if (!me) return;
+    if (me.pending) {
+      // FIXED (11.0 review finding #1): the chip-loss/immediate-fold
+      // consequence now lives in the dialog's own static HTML body text
+      // (#leave-table-dialog-hint / #leave-table-dialog-consequence),
+      // not just a button tooltip -- no need to set it here.
+      el.leaveTableDialog.showModal();
+    } else {
+      if (!window.confirm('Leave the table? Your chips will be lost.')) return;
+      send('leaveTable', { mode: 'foldAndLeave' }); // mode ignored server-side -- no pending stake
+    }
+  });
+  el.btnLeaveFold.addEventListener('click', () => {
+    send('leaveTable', { mode: 'foldAndLeave' });
+    el.leaveTableDialog.close();
+  });
+  el.btnLeaveAtCycleClose.addEventListener('click', () => {
+    send('leaveTable', { mode: 'leaveAtCycleClose' });
+    el.leaveTableDialog.close();
+  });
+  el.btnLeaveCancel.addEventListener('click', () => el.leaveTableDialog.close());
+
   // ---- Game Rules modal (v4.0 §10.3) ----
 
   el.btnOpenRulesDialog.addEventListener('click', () => {
@@ -1168,6 +1285,59 @@
     return !!gameTable.players.find((p) => p.id === state.playerId)?.isDealer;
   }
 
+  // ---- Inactivity close warning (NEW 11.0, Part H.2) ----
+
+  const INACTIVITY_BANNER_WINDOW_MS = 5 * 60 * 1000;
+  const INACTIVITY_POPUP_WINDOW_MS = 60 * 1000;
+
+  /**
+   * Purely derived from gameTable.tableCloseAt -- the one fact the
+   * server computes and exposes (Standing Convention). Ticks on its own
+   * (see the setInterval below) rather than only re-running when a new
+   * gameTableState happens to arrive, since the table could sit
+   * perfectly idle -- no new broadcasts at all -- right through the
+   * T-5/T-1 thresholds otherwise.
+   */
+  function renderInactivityWarning(gameTable) {
+    if (!gameTable || typeof gameTable.tableCloseAt !== 'number') {
+      el.inactivityBanner.hidden = true;
+      if (el.inactivityPopup.open) el.inactivityPopup.close();
+      return;
+    }
+    const msRemaining = gameTable.tableCloseAt - Date.now();
+    const secondsRemaining = Math.max(0, Math.round(msRemaining / 1000));
+
+    if (msRemaining > INACTIVITY_BANNER_WINDOW_MS) {
+      el.inactivityBanner.hidden = true;
+    } else {
+      el.inactivityBanner.hidden = false;
+      const minutes = Math.max(1, Math.ceil(secondsRemaining / 60));
+      el.inactivityBanner.textContent = `This table will close in about ${minutes} minute${minutes === 1 ? '' : 's'} due to inactivity. Start a hand to keep it open.`;
+    }
+
+    const isOwner = gameTable.creatorId === state.playerId;
+    if (isOwner && msRemaining <= INACTIVITY_POPUP_WINDOW_MS && msRemaining > 0) {
+      el.inactivityPopupHint.textContent = `This table will close in ${secondsRemaining}s due to inactivity.`;
+      if (!el.inactivityPopup.open) el.inactivityPopup.showModal();
+    } else if (el.inactivityPopup.open && (msRemaining > INACTIVITY_POPUP_WINDOW_MS || msRemaining <= 0)) {
+      // Real activity pushed tableCloseAt back out, or (for a non-owner,
+      // or once time is actually up) the popup shouldn't be showing.
+      el.inactivityPopup.close();
+    }
+  }
+
+  el.btnRestartActivityClock.addEventListener('click', () => {
+    send('restartActivityClock');
+    el.inactivityPopup.close();
+  });
+
+  // Ticks independently of state broadcasts -- see renderInactivityWarning()'s
+  // own comment for why relying only on new gameTableState messages
+  // wouldn't reliably cross the T-5/T-1 thresholds on a truly idle table.
+  setInterval(() => {
+    if (state.lastGameTable) renderInactivityWarning(state.lastGameTable);
+  }, 5000);
+
   // ---- About modal (NEW 4.1 §10.7) ----
 
   el.btnOpenAboutDialog.addEventListener('click', () => {
@@ -1215,6 +1385,66 @@
   el.btnToCommitBatch.addEventListener('click', () => {
     if (!window.confirm('Apply this entire batch now? This cannot be undone.')) return;
     send('commitPotDistribution');
+  });
+
+  // ---- Table Owner Settings (NEW 11.0, the-cut-spec_v11-0.md Part B/D) ----
+
+  el.btnOpenSettingsDialog.addEventListener('click', () => {
+    if (state.lastGameTable) renderSettingsDialog(state.lastGameTable);
+    el.settingsDialog.showModal();
+  });
+  el.btnSettingsClose.addEventListener('click', () => el.settingsDialog.close());
+  el.btnSettingsSaveTimeout.addEventListener('click', () => {
+    const seconds = Number(el.settingsReconnectTimeout.value);
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    send('setReconnectTimeout', { seconds });
+  });
+
+  /**
+   * NEW 11.0 (Part B/D): populates the current reconnect timeout and the
+   * live reconnect-code list. `gameTable.reconnectCodes` is only ever
+   * populated (non-null) when this client IS the Table Owner -- the
+   * server never sends it to anyone else -- so this renders an empty
+   * list rather than erroring for any caller that isn't the Table Owner
+   * (the dialog itself is only reachable via the TO-only rail button
+   * anyway, but this stays defensive regardless).
+   */
+  function renderSettingsDialog(gameTable) {
+    el.settingsReconnectTimeout.value = gameTable.reconnectTimeoutSeconds;
+    el.settingsReconnectCodes.innerHTML = '';
+    const codes = gameTable.reconnectCodes || {};
+    for (const player of gameTable.players) {
+      const row = document.createElement('p');
+      row.className = 'to-section-hint';
+      row.textContent = `${player.name}: ${codes[player.id] || '\u2014'}`;
+      el.settingsReconnectCodes.appendChild(row);
+    }
+  }
+
+  // ---- Remove Player / End Game (NEW 11.0, the-cut-spec_v11-0.md Part F.2/F.6) ----
+
+  el.btnToRemovePlayer.addEventListener('click', () => {
+    const targetPlayerId = el.toRemovePlayerSelect.value;
+    if (!targetPlayerId) return;
+    const gameTable = state.lastGameTable;
+    const target = gameTable?.players.find((p) => p.id === targetPlayerId);
+    if (!target) return;
+    if (target.pending) {
+      // Mirrors Leave Table's own choice, decided by the Table Owner on
+      // the target Player's behalf since they aren't the one clicking.
+      const foldNow = window.confirm(
+        `${target.name} has a pending stake in the current hand. Click OK to fold them and remove them now (forfeiting their stake), or Cancel to remove them once the current cycle closes instead (their hand stays live until then).`
+      );
+      send('removePlayerFromTable', { targetPlayerId, mode: foldNow ? 'foldAndLeave' : 'leaveAtCycleClose' });
+      return;
+    }
+    if (!window.confirm(`Remove ${target.name} from the table?`)) return;
+    send('removePlayerFromTable', { targetPlayerId, mode: 'foldAndLeave' });
+  });
+
+  el.btnToEndGame.addEventListener('click', () => {
+    if (!window.confirm('End this table for everyone? Every player will be disconnected and the table will cease to exist. This cannot be undone.')) return;
+    send('endGame');
   });
 
   // ---- Claim Pot builder (split pots, spec §6.2; multi-pot NEW 9.0 §6.10) ----
@@ -1441,6 +1671,7 @@
     renderBettingRail(gameTable, me);
     renderDealInterrupt(gameTable, me);
     renderTableNotice(gameTable, me);
+    renderInactivityWarning(gameTable); // NEW 11.0 (Part H.2)
     renderTableOwnerControls(gameTable);
   }
 
@@ -1476,7 +1707,14 @@
     // stopped executing for them the moment they were no longer Dealer,
     // freezing at whatever it last was while they still held the role.
     el.btnSameGame.hidden = !(isDealer && gameTable.idle && gameTable.gameChoiceId);
-    el.btnSameGame.disabled = !!gameTable.pendingClaim; // NEW 6.1 (§6.5)
+    // CHANGED 11.0 (Part I/Standing Convention): also disabled while
+    // anyone's disconnected -- startGame() itself now rejects this
+    // server-side (see _anyoneDisconnected()'s own comment); the client
+    // reads the same server-computed answer rather than re-deriving it.
+    el.btnSameGame.disabled = !!gameTable.pendingClaim || gameTable.anyoneDisconnected; // NEW 6.1 (§6.5)
+    el.btnSameGame.title = gameTable.anyoneDisconnected
+      ? 'Waiting for a disconnected player to reconnect (or for their grace period to expire) before starting a new hand'
+      : 'Start a fresh hand of the current Game Choice';
 
     el.btnOpenOptionsDialog.disabled = !gameTable.gameOptions;
 
@@ -1611,6 +1849,17 @@
     el.btnOptionsConfirm.title = editable
       ? "Save any changes and apply this Dealer's ante/blind"
       : 'Close';
+    // CHANGED 11.0 (Part I/Standing Convention): "Start" specifically
+    // (not "Close") is also disabled while anyone's disconnected --
+    // startGame() itself now rejects this server-side; the client reads
+    // the same server-computed answer rather than leaving the button
+    // clickable and rejected after the fact.
+    if (editable && gameTable.anyoneDisconnected) {
+      el.btnOptionsConfirm.disabled = true;
+      el.btnOptionsConfirm.title = 'Waiting for a disconnected player to reconnect (or for their grace period to expire) before starting a new hand';
+    } else {
+      el.btnOptionsConfirm.disabled = false;
+    }
     // NEW 10.4 (Part C): only makes sense in the same state Start does
     // -- backing out to pick a different game before the hand exists is
     // meaningless once Options is in its read-only ("Close") state.
@@ -2503,6 +2752,13 @@
     buyin.textContent = `$${me.totalBuyIn} bought in total`;
     el.ownChipReadout.append(total, buyin);
 
+    // NEW 11.0 (Part D): shown once known -- state.myReconnectCode is
+    // set from the 'joined' message, which covers both an original join
+    // and a reconnect (the code is the same one either way).
+    el.ownReconnectCodeReadout.textContent = state.myReconnectCode
+      ? `Your reconnect code: ${state.myReconnectCode} (if you get disconnected, use this to rejoin)`
+      : '';
+
     if (me.sitInPending) {
       el.btnSitToggle.textContent = 'Rejoining next hand\u2026';
       el.btnSitToggle.disabled = true;
@@ -2527,6 +2783,10 @@
    */
   function renderTableOwnerControls(gameTable) {
     const isOwner = gameTable.creatorId === state.playerId;
+    // NEW 11.0 (Part B): keep the Settings dialog's contents live if the
+    // Table Owner happens to have it open while a broadcast arrives
+    // (e.g. watching the reconnect-code list while someone's mid-disconnect).
+    if (isOwner && el.settingsDialog.open) renderSettingsDialog(gameTable);
     // FIXED 10.4 (the-cut-spec_v10-4.md, 10.4 Completion Gap 1): the
     // button itself is gated directly, not just its wrapping
     // `tableOwnerRailGroup` -- explicitly requested rather than relying
@@ -2534,7 +2794,27 @@
     // no reason not to also do it directly.
     el.btnOpenTableOwnerDialog.hidden = !isOwner;
     el.tableOwnerRailGroup.hidden = !isOwner;
+    el.tableOwnerSectionDivider.hidden = !isOwner; // FIXED (11.0 review finding #2)
+    el.tableOwnerSectionLabel.hidden = !isOwner;
     if (!isOwner) return;
+
+    // NEW 11.0 (Part F.2): Remove Player's target dropdown -- every
+    // OTHER seated player (never includes the Table Owner themselves;
+    // they'd use Leave Table for that). Rebuilt each render, same
+    // simple-rebuild justification as toAllocPlayer's own comment.
+    const previousRemoveSelection = el.toRemovePlayerSelect.value;
+    el.toRemovePlayerSelect.innerHTML = '';
+    for (const player of gameTable.players) {
+      if (player.id === state.playerId) continue;
+      const option = document.createElement('option');
+      option.value = player.id;
+      option.textContent = player.name;
+      el.toRemovePlayerSelect.appendChild(option);
+    }
+    if ([...el.toRemovePlayerSelect.options].some((o) => o.value === previousRemoveSelection)) {
+      el.toRemovePlayerSelect.value = previousRemoveSelection;
+    }
+    el.btnToRemovePlayer.disabled = el.toRemovePlayerSelect.options.length === 0;
 
     const batch = gameTable.pendingAllocationBatch;
     const idle = !!gameTable.idle;
@@ -2725,7 +3005,31 @@
       lostPotBadge.textContent = 'Out of Hand';
       info.appendChild(lostPotBadge);
     }
-    if (player.sitInPending) {
+    if (player.connected === false) {
+      // NEW 11.0 (Part A/B/G): a disconnected Player who hasn't yet hit
+      // their grace-period expiry. Distinct from the "Sitting Out"
+      // badge below, which fires only once the grace period actually
+      // runs out -- this is the "still waiting for them" state. Reads
+      // the server-computed deadline directly (Standing Convention),
+      // never re-derives it from a locally-ticking clock.
+      const disconnectedBadge = document.createElement('span');
+      disconnectedBadge.className = 'seat-sitting-out-badge seat-disconnected-badge';
+      const secondsLeft = Math.max(0, Math.round((player.disconnectDeadline - Date.now()) / 1000));
+      disconnectedBadge.title = `${player.name} disconnected -- the table will wait ${secondsLeft}s more before moving them to Sitting Out`;
+      disconnectedBadge.textContent = `Disconnected (${secondsLeft}s)`;
+      info.appendChild(disconnectedBadge);
+    }
+    if (player.pendingDeparture) {
+      // NEW 11.0 (Part F.4): takes priority over the plain Sitting Out
+      // badge below -- they're sittingOut===true underneath (reusing
+      // that machinery, see _deferDeparture()'s own comment), but this
+      // is the more accurate status: they're not coming back.
+      const departureBadge = document.createElement('span');
+      departureBadge.className = 'seat-sitting-out-badge';
+      departureBadge.title = `${player.name} will leave the table once the current cycle closes`;
+      departureBadge.textContent = 'Leaving Table';
+      info.appendChild(departureBadge);
+    } else if (player.sitInPending) {
       // v4.2 §9: takes priority over the plain "Sitting Out" badge --
       // they're still sittingOut===true underneath, but visually this is
       // the more accurate, more reassuring status.
@@ -3197,6 +3501,13 @@
         ? 'End this hand because the kill card appeared \u2014 requires confirmation'
         : 'Reshuffle and request a fresh ante for another Hand in this Cycle';
       el.btnNewHand.dataset.killCard = isKillHand ? newHandView.killCard || '' : '';
+      // CHANGED 11.0 (Part I/Standing Convention): also disabled while
+      // anyone's disconnected -- newHand() itself now rejects this
+      // server-side; the client reads the same server-computed answer.
+      if (gameTable.anyoneDisconnected) {
+        el.btnNewHand.disabled = true;
+        el.btnNewHand.title = 'Waiting for a disconnected player to reconnect (or for their grace period to expire) before starting a new hand';
+      }
     }
     // NEW 8.2 (§6.9): Kill Hand repositioned to the very bottom of the
     // Dealer's Rail, separated from the last ordinary button by generous
@@ -3466,5 +3777,6 @@
   loadGameChoices();
   loadAppInfo();
   makeDialogsDraggable();
+  maybeAutoFillRejoinFromUrl(); // NEW 11.0 (Part D)
   connect();
 })();

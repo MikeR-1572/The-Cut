@@ -196,7 +196,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
 
 .lobby-grid {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
   gap: 24px;
   align-items: start;
 }
@@ -722,6 +722,14 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   border-radius: 4px;
   flex-shrink: 0;
 }
+/* NEW 11.0 (Part A/B): a distinct amber/warning tint from the neutral
+   Sitting Out badge above -- this is a live, ticking, "waiting to see if
+   they come back" state, not yet the settled Sitting Out outcome. */
+.seat-disconnected-badge {
+  color: #e8c98a;
+  background: rgba(201, 163, 92, 0.16);
+  border: 1px solid rgba(201, 163, 92, 0.45);
+}
 /* NEW 9.0 (§3, §6.11): persistent, distinct from Folded/Sitting Out --
    warm gold to match .btn-allin, signaling "still live, out of chips." */
 .seat-allin-badge {
@@ -1180,6 +1188,21 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   background: rgba(201, 163, 92, 0.2);
 }
 .rail-divider:first-child { margin-top: 0; }
+
+/* FIXED (11.0 review finding #2): the labeled variant of the plain
+   .rail-divider above -- used once, for the Table Owner section, where
+   the divider alone wasn't a strong enough signal on its own (per
+   Mike's explicit request for "some text to go along with it"). Sits
+   directly under the divider, pulling its own top margin in to read as
+   one unit with it rather than two separately-spaced elements. */
+.rail-section-label {
+  margin: -6px 0 10px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ivory-dim);
+  text-align: center;
+}
 
 /* Rabbit Hunt (v4.3 §5.6/§10.9) -- rare, time-limited action, given a
    brass accent so it stands out when it appears. */

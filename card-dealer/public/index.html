@@ -57,6 +57,25 @@
         </label>
         <button class="btn btn-secondary" id="btn-join-game-table" title="Join this table with the code above">Take a Seat</button>
       </div>
+
+      <div class="lobby-divider" aria-hidden="true"><span>or</span></div>
+
+      <!-- NEW 11.0 (Part D): the primary, discoverable reconnect path --
+           a dedicated code entry, separate from Join a Table's name/code
+           pair, since a returning Player doesn't re-enter their name. -->
+      <div class="lobby-card">
+        <h2>Re-join a table</h2>
+        <p class="hint">Got disconnected? Enter your reconnect code to pick up right where you left off.</p>
+        <label class="field">
+          <span>Reconnect code</span>
+          <input type="text" id="rejoin-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+        </label>
+        <label class="field">
+          <span>Table code</span>
+          <input type="text" id="rejoin-table-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+        </label>
+        <button class="btn btn-secondary" id="btn-rejoin-game-table" title="Reconnect using your code">Re-Join</button>
+      </div>
     </section>
 
     <p class="lobby-error" id="lobby-error" role="alert" hidden></p>
@@ -98,6 +117,12 @@
          spec, not a modal. See renderTableNotice() in client.js. -->
     <p class="table-notice" id="table-notice" role="status" hidden></p>
 
+    <!-- NEW 11.0 (Part H.2): the T-5-minute inactivity warning banner,
+         shown to everyone. Purely derived client-side from
+         gameTable.tableCloseAt -- see renderInactivityWarning() in
+         client.js. -->
+    <p class="table-notice inactivity-banner" id="inactivity-banner" role="status" hidden></p>
+
     <section class="claim-banner" id="claim-banner" hidden>
       <div id="claim-banner-body"></div>
       <div class="rail-row" id="claim-banner-actions" hidden>
@@ -115,9 +140,16 @@
         <button class="player-rail-toggle has-hint" id="btn-player-rail-toggle" type="button" title="Collapse/expand your rail" aria-expanded="true">&#8249;</button>
         <div class="player-rail-content" id="player-rail-content">
           <h2>Your rail</h2>
+          <!-- NEW 11.0 (Part D): shown so a player has their own code
+               without needing to ask the Table Owner for it. -->
+          <p class="hint-small" id="own-reconnect-code-readout"></p>
           <div class="rail-group own-chip-readout" id="own-chip-readout"></div>
           <div class="rail-group">
             <button class="btn btn-secondary" id="btn-sit-toggle" type="button" title="Sit out or back in">Sit Out</button>
+          </div>
+          <!-- NEW 11.0 (Part F.1) -->
+          <div class="rail-group">
+            <button class="btn btn-secondary" id="btn-leave-table" type="button" title="Permanently leave this table">Leave Table</button>
           </div>
           <!-- CHANGED 7.2 (§10.2): About moves to its own line below Buy
                Chips -- no longer needs to share a line with it. Rail width
@@ -128,10 +160,20 @@
           <div class="rail-group rail-row rail-row--secondary">
             <button class="btn btn-secondary btn-small" id="btn-open-about-dialog" type="button" title="About this app">About</button>
           </div>
+          <!-- FIXED (11.0 review finding #2): visual separation + label
+               between ordinary player controls and Table-Owner-exclusive
+               ones, per Mike's explicit request. Reuses the existing
+               .rail-divider line (already used four times on the
+               Dealer's Rail) plus a short label; both toggle hidden in
+               lockstep with #table-owner-rail-group itself in
+               renderTableOwnerControls() (client.js). -->
+          <div class="rail-divider" id="table-owner-section-divider" hidden></div>
+          <p class="rail-section-label" id="table-owner-section-label" hidden>Table Owner</p>
           <!-- NEW 10.4 (the-cut-spec_v10-4.md Part A §5): Table-Owner-only,
                visible only when creatorId === the viewer's own id -- see
                renderTableOwnerControls() in client.js. -->
           <div class="rail-group rail-row rail-row--secondary" id="table-owner-rail-group" hidden>
+            <button class="btn btn-secondary btn-small" id="btn-open-settings-dialog" type="button" title="Reconnect timeout, reconnect codes">Settings</button>
             <button class="btn btn-secondary btn-small" id="btn-open-table-owner-dialog" type="button" title="Emergency table recovery tools">Table Owner Tools</button>
           </div>
         </div>
@@ -394,6 +436,32 @@
       </div>
     </dialog>
 
+    <!-- ---- Leave Table choice dialog. NEW 11.0, the-cut-spec_v11-0.md
+         Part F.1 -- mirrors the Sit Out dialog's own shape: a pending
+         mid-cycle stake gets the fold-now/wait-for-cycle-close choice;
+         no pending stake skips straight to a plain confirm(). ---- -->
+    <dialog id="leave-table-choice-dialog" class="chip-dialog">
+      <h3>Leave Table</h3>
+      <p class="dialog-hint" id="leave-table-dialog-hint">You have a pending stake in the current hand, and your chip balance will be lost when you leave. What would you like to do?</p>
+      <p class="dialog-hint" id="leave-table-dialog-consequence">"Fold and Leave Now" folds this hand immediately and leaves right away. "Leave After This Cycle" keeps your hand fully live until the cycle ends, then leaves automatically -- your remaining chips are lost at that point either way.</p>
+      <div class="dialog-actions dialog-actions--stack">
+        <button type="button" class="btn btn-secondary" id="btn-leave-fold" title="Fold this hand, forfeit your stake, and leave immediately">Fold and Leave Now</button>
+        <button type="button" class="btn btn-secondary" id="btn-leave-at-cycle-close" title="Finish this hand/cycle normally, then leave">Leave After This Cycle</button>
+        <button type="button" class="btn btn-secondary" id="btn-leave-cancel" title="Stay at the table">Cancel</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Inactivity close-warning popup (NEW 11.0, Part H.2):
+         Table-Owner-only, shown starting 1 minute before tableCloseAt.
+         See renderInactivityWarning() in client.js. ---- -->
+    <dialog id="inactivity-popup" class="chip-dialog">
+      <h3>Table Closing Soon</h3>
+      <p class="dialog-hint" id="inactivity-popup-hint">This table will close in 60s due to inactivity.</p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-primary" id="btn-restart-activity-clock" title="Restart the inactivity clock">Keep Table Open</button>
+      </div>
+    </dialog>
+
     <!-- ---- Claim Pot builder (v3.3: proposer's row first, defaults to 100% self-claim, per-row 1/2 & 1/4 fraction buttons) ---- -->
     <dialog id="claim-pot-dialog" class="chip-dialog">
       <h3>Claim Pot</h3>
@@ -517,8 +585,53 @@
         </div>
       </section>
 
+      <!-- NEW 11.0 (Part F.2/F.6) -->
+      <section class="to-section">
+        <h4>Remove Player</h4>
+        <p class="to-section-hint">Forces the same outcome as if the player had clicked Leave Table themselves.</p>
+        <div class="to-alloc-form">
+          <select id="to-remove-player" class="mono-input"></select>
+          <button type="button" class="btn btn-secondary btn-small" id="btn-to-remove-player" title="Remove this player from the table">Remove</button>
+        </div>
+      </section>
+
+      <section class="to-section">
+        <h4>End Game</h4>
+        <p class="to-section-hint">Ends the entire table/session -- everyone is disconnected and the table itself ceases to exist. Distinct from Terminate Cleanly, which only ends the current hand.</p>
+        <button type="button" class="btn btn-secondary" id="btn-to-end-game" title="End this table for everyone">End Game</button>
+      </section>
+
       <div class="dialog-actions">
         <button type="button" class="btn btn-secondary" id="btn-to-close" title="Close">Close</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Table Owner Settings (NEW 11.0, the-cut-spec_v11-0.md Part B/D):
+         general TO configuration surface, not named after any single
+         feature inside it -- houses the reconnect-timeout-length setting
+         and the active reconnect-code list. See renderSettingsDialog()
+         in client.js. ---- -->
+    <dialog id="settings-dialog" class="chip-dialog table-owner-dialog">
+      <h3>Table Owner Settings</h3>
+
+      <section class="to-section">
+        <h4>Reconnect Timeout</h4>
+        <p class="to-section-hint">How long a disconnected player's seat is held before they're moved to Sitting Out.</p>
+        <div class="to-alloc-form">
+          <input type="number" id="settings-reconnect-timeout" min="1" class="mono-input" />
+          <span>seconds</span>
+          <button type="button" class="btn btn-secondary btn-small" id="btn-settings-save-timeout" title="Save this timeout">Save</button>
+        </div>
+      </section>
+
+      <section class="to-section">
+        <h4>Reconnect Codes</h4>
+        <p class="to-section-hint">If a player's device dies, read them their code directly.</p>
+        <div id="settings-reconnect-codes"></div>
+      </section>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-settings-close" title="Close">Close</button>
       </div>
     </dialog>
 

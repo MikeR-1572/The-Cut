@@ -1,4 +1,200 @@
-# The Cut — Card Dealing & Betting Engine (v10.4)
+# The Cut — Card Dealing & Betting Engine (v11.0)
+
+**Disconnection, Reconnection, Leave Table/Remove Player, and table
+lifecycle** — built from `the-cut-spec_v11-0.md` (Parts A through I),
+`reconnection-reconciliation-11-0.md`, and `10-0-reconnection-reference.md`.
+`npm test` — **429 tests** (up from 393 in v10.4 — 36 new, all in
+`test/gameTable-11-0.test.js`; no existing test removed or weakened).
+Live end-to-end WebSocket verification run and passed
+(`live_test_11_0.js`, covering disconnect detection through reconnect
+and Leave Table/Remove Player/End Game; a separate throwaway harness
+covering the zero-connection and inactivity lifecycle timeouts on
+shortened windows, since those run on 30–45 minute clocks by default).
+
+## Part A/B — Heartbeat detection and the reconnect grace period
+
+Every socket is pinged every 5 seconds; two missed pongs in a row
+(~10–12s of silence) is treated as a lost connection, via the exact
+same `handleConnectionLost()` path a clean tab close uses — both route
+into `GameTable.markDisconnected()`, never straight into the old,
+blunt `removePlayer()`. A configurable grace period then runs (default
+30s, Table-Owner-adjustable from the new Settings dialog) before the
+Player actually converts to Sitting Out. The heartbeat interval itself
+is a server-level constant, not Table-Owner-exposed — a technical
+tripwire, not a social preference, per the explicit reasoning worked
+through with Mike (server load, false-positive risk on a merely laggy
+connection).
+
+## Part C — Involuntary timeout ≠ voluntary Sit Out
+
+A disconnect that runs out its grace period converges into the
+existing Sitting Out mechanic, but with a deliberately different
+resolution rule than Sit Out's own explicit "Fold and Sit Out": check
+if free, fold only if actually facing a live bet
+(`_resolveAbsentPlayerTurn()`), reusing the exact "amount owed" figure
+the client's own "$YY to You" display is built from. Caught and fixed
+during this build's own testing, before it shipped: an early draft
+reused Sit Out's unconditional-fold logic for this path, which would
+have folded a disconnected Player who owed nothing.
+
+## Part D — Reconnect codes
+
+Every seated Player gets a 6-character reconnect code the moment they
+join (not only once they first disconnect), shown on their own rail so
+they don't need to ask the Table Owner for it, and visible to the
+Table Owner for every seated Player via the new Settings dialog. A
+currently-connected Player's code cannot be used from a second device
+— rejected with the same generic message a wrong code gets, so a
+guesser learns nothing either way. Reconnect attempts are rate-limited
+per IP (5 attempts/minute, then a 5-minute cooldown).
+
+## Part E — Dealer-specific handling
+
+A disconnected Dealer's role transfers via a **direct call to
+`_reassignDealerToNextEligible()`**, never `passTheBuck()` — confirmed
+during the reconciliation pass that `passTheBuck()` genuinely cannot
+serve this purpose (requires the Dealer themselves as requester; gated
+to between-hands only). If the handoff happens mid-cycle, the
+**positional anchor splits**: the original Dealer's seat stays the
+blinds/first-to-act reference for the rest of the current cycle even
+though `isDealer` has already moved, via a new `dealerPositionAnchorId`
+field consulted at every call site that used to read the Dealer's seat
+purely for position. Clears automatically the moment the cycle
+actually closes (`_setHandPhase()`, the one place a cycle boundary is
+recognized). Disconnected candidates are correctly skipped when
+picking a replacement Dealer, generalizing to multiple simultaneous
+disconnects.
+
+## Part F — Leave Table / Remove Player (a real gap, not in the
+original 10.0-era reconnection design)
+
+`leaveTable()`/`removePlayerFromTable()` reuse the exact same
+`_isPending()` gate Buy Chips already relies on: no unresolved stake,
+leave immediately; a pending stake, choose fold-now-and-leave or
+wait-until-cycle-close (mirroring Sit Out's own existing choice).
+Compaction of the seat list only ever happens at a cycle boundary,
+never mid-cycle, even when the departure itself was triggered
+mid-cycle — a deferred departure reuses the fully-audited Sitting Out
+machinery (`pendingDeparture` is consulted in exactly one other place:
+the cycle-close hook) rather than teaching a new eligibility concept to
+every consumer.
+
+**`removePlayer()` itself was reconciled, not retired** — the spec's
+own groundwork had flagged this as a genuine open question. It's now
+exclusively the "permanently delete this seat" primitive, called only
+at the moment a departure actually takes effect, fixed to reassign the
+Dealer role properly (`_reassignDealerToNextEligible()`, not
+"whoever's first in turn order") and to handle an in-flight pot claim
+deliberately: a departing Player who held only the **approver** role
+(no real stake) gets their approval reassigned to the next eligible
+Player instead of the whole claim being silently voided; a departing
+proposer or allocation recipient still voids the claim outright — the
+safe fallback, and, per Mike's own explicit call, not something this
+needed to get perfectly right in every combination (Table Owner
+Functions 1–3 remain the backstop for exactly this class of edge case).
+
+End Game (Part F.6) is a new, real Table Owner function — distinct
+from Function 1 (Terminate Cleanly), which only ends the current hand.
+End Game disconnects every seated Player and deletes the table itself.
+
+## Part G — Notifications
+
+Disconnect, reconnect, grace-period expiry, and departure all queue an
+immediate table-wide announcement from inside `GameTable` itself
+(consistent with how every other announcement in this codebase already
+works), plus the one row the notification table required that hadn't
+existed anywhere before 11.0: a brand-new Player joining (including
+session start) now also announces itself. A failed or blocked
+reconnect attempt is deliberately silent — no announcement, so a
+guesser or a legitimate device conflict both look the same to everyone
+else at the table.
+
+## Part H — Table lifecycle
+
+Two independent timeouts, checked on a single shared 60-second sweep
+rather than a timer per table:
+
+- **H.1 (zero connections):** if literally nobody is connected to a
+  table for 45 minutes, it's wiped with nobody left to notify.
+- **H.2 (idle but connected):** if no real activity happens at a table
+  for 30 minutes, it closes and every connected Player is notified and
+  returned to the lobby. "Real activity" is any message against an
+  already-established table context, touched generically at the
+  dispatch layer rather than sprinkled through every individual
+  game-action method — a join or reconnect touches it explicitly
+  inside `GameTable` itself.
+
+Both timeouts share one server-computed fact — `tableCloseAt`,
+`toRedactedState`'s own field — which the client reads directly for
+its T-5-minute banner (everyone) and T-1-minute popup (Table Owner
+only, with a "Keep Table Open" button), per the Standing Convention:
+the server computes the real answer once, the client never re-derives
+it. The actual authoritative close is enforced server-side regardless
+of whether any client is even watching the clock.
+
+## Part I — The required exhaustive eligibility audit
+
+Walked every named consumer (`_isHandParticipant`, `_canAct`,
+`_isPending`, turn order construction, claim eligibility, dealing)
+against the new states 11.0 introduces (mid-grace-period,
+timed-out-into-Sitting-Out, reconnecting, pending-departure). Most of
+this machinery needed no change at all — a mid-grace-period Player
+(`connected: false`, `sittingOut` still `false`) is correctly still
+treated as a full, live hand participant everywhere, which is exactly
+the "table freezes, waiting for them" behavior Part B calls for.
+
+**One genuine gap found and fixed:** nothing stopped a brand-new hand
+from being dealt while a Player was disconnected but hadn't yet timed
+out — they'd be dealt cards and assigned an ante they had no way to
+post. Fixed at the two actual entry points, `startGame()`/`newHand()`,
+which now reject while anyone is disconnected (`anyoneDisconnected`,
+exposed via `toRedactedState` so the "Start"/"Same Game"/"New Hand"
+controls are disabled client-side with an explanation, per the
+Standing Convention, rather than left clickable and rejected after the
+fact).
+
+**A broader version of that same fix was drafted first, then reverted**
+after tracing a real cross-consumer regression it would have caused:
+excluding `connected: false` directly from `_computeBlindSeats()`
+would have broken that function's OTHER caller
+(`openBetting()`'s PreFlopBetting recomputation, which must reproduce
+the exact same blind assignment already used to seed real posted money
+at RequestAntes — even if that Player's connection status changes in
+between). `_computeBlindSeats()` itself is deliberately unchanged;
+there's a regression test pinning down exactly why. Recorded here
+because it's the kind of thing Part I's own audit discipline exists to
+catch, not because it shipped.
+
+## Review pass — three items found and fixed
+
+A first-pass review against `the-cut-spec_v11-0.md` found the
+substance of the build sound (in particular, the `removePlayer()`
+reconciliation and claim-approver handling above were confirmed
+correct on direct reading) but flagged three real gaps, all fixed
+here:
+
+1. **Leave Table's mid-cycle confirmation dialog** stated the
+   chip-loss/immediate-fold consequence only in a button's hover
+   tooltip, not in the dialog's own visible body text. Fixed —
+   `#leave-table-dialog-consequence` states it plainly.
+2. **No visual separation** existed between ordinary Player Rail
+   controls and the Table-Owner-exclusive section, per Mike's explicit
+   request for "a line... maybe some text to go along with it." Fixed
+   — reuses the existing `.rail-divider` line (already used four times
+   on the Dealer's Rail) plus a new "Table Owner" label, both toggling
+   in lockstep with the section itself.
+3. **This README** wasn't updated for 11.0 at all before this pass —
+   now is.
+
+**A fourth item, found while re-running the live smoke test after the
+above fixes, not from the review document:** the Part G "player
+joined" announcement was correctly queued by `addPlayer()`, but
+`handleCreateGameTable()`/`handleJoinGameTable()` in `server.js` never
+actually called `broadcastAnnouncements()` — so it was silently
+dropped every time, for every table, since the moment Part G was
+built. Fixed by adding the missing call to both handlers, alongside
+the state broadcast they already send.
+
 
 **Corrected against `the-cut-spec_v10-4.md`'s final "10.4 Completion"
 section**, added after review of the first v10.4 delivery flagged two

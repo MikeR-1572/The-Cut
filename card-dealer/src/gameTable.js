@@ -212,6 +212,47 @@ class GameTable {
     // staging needs to start mid-hand.
     this._pendingAllocationBatch = null;
     this._nextAllocationId = 1;
+
+    // NEW 11.0 (the-cut-spec_v11-0.md Parts B/D): table-level reconnect
+    // grace-period length, in seconds. Room-level state, same category as
+    // `pot`/`dealerId` -- never reset on Select, table-owner-configurable
+    // via setReconnectTimeout(), surfaced through the Table Owner Settings
+    // dialog (client-side), not a Dealer Option. Default matches the
+    // spec's own starting point; not locked in.
+    this.reconnectGraceSeconds = 30;
+
+    // NEW 11.0 (Part E): when a mid-hand emergency Dealer handoff occurs
+    // (the ORIGINAL Dealer disconnects past their grace period while a
+    // hand/cycle is in progress), this holds the ORIGINAL Dealer's id --
+    // the positional anchor (blinds, first-to-act) stays theirs for the
+    // rest of the current cycle even though `isDealer` has already moved
+    // to the interim Dealer. null whenever no split is in effect (the
+    // overwhelmingly common case -- Dealer role and positional anchor are
+    // the same seat). Cleared the moment the cycle actually closes -- see
+    // _setHandPhase().
+    this.dealerPositionAnchorId = null;
+
+    // NEW 11.0 (Part H.2): inactivity/idle-but-connected table lifecycle.
+    // Server-level constant, not Table-Owner-configurable (unlike the
+    // reconnect grace period) -- chosen partly for hosting-cost reasons
+    // (idle server time), same "we won't know until we experience it"
+    // posture as every other timer in this spec, but not a matter of
+    // per-table taste the way the reconnect grace period is.
+    this.lastActivityAt = Date.now();
+    this.inactivityTimeoutSeconds = 30 * 60;
+  }
+
+  /**
+   * NEW 11.0 (Part H.2): called on any real game activity (a new hand/
+   * cycle started, an action taken, a join, a reconnect) -- resets the
+   * inactivity clock to zero. The client derives its own T-5/T-1 banner
+   * and popup windows purely from the `tableCloseAt` timestamp this
+   * produces (see toRedactedState) rather than the server pushing
+   * separate one-off "warning" messages -- the Standing Convention
+   * applies here too: one server-computed fact, read directly.
+   */
+  touchActivity() {
+    this.lastActivityAt = Date.now();
   }
 
   getDealer() {
@@ -234,13 +275,54 @@ class GameTable {
   addPlayer(id, name) {
     const isFirst = this.players.length === 0;
     const player = createPlayer(id, name, isFirst); // NEW 8.0 (§4) -- delegates to the Player/Bank module
+    // NEW 11.0 (Part D): every seated Player gets a reconnect code the
+    // moment they join, not only once they first disconnect -- generated
+    // per player per session, exactly as the spec describes it. Also NEW
+    // 11.0: `connected`/`disconnectedAt`, tracked here (not in
+    // src/player.js's bank/identity module) since these are connection-
+    // lifecycle fields, not bank fields.
+    player.connected = true;
+    player.disconnectedAt = null;
+    player.reconnectCode = this._generateReconnectCode();
+    // NEW 11.0 (Part F): true once a deferred (mid-cycle) Leave Table/
+    // Remove Player is pending -- consulted in exactly one place, the
+    // cycle-close hook in _setHandPhase(), which performs the actual
+    // removal. Deliberately not a new concept anywhere else: a
+    // pendingDeparture Player is ALSO sittingOut, so every existing
+    // eligibility consumer (dealing, turn order, claims) already treats
+    // them correctly without needing to learn a new status.
+    player.pendingDeparture = false;
     this.players.push(player);
     this.turnOrder.push(id);
     if (isFirst) {
       this.currentTurnPlayerId = id;
       this.creatorId = id; // fixed for the gameTable's lifetime -- distinct from Dealer, which can transfer
     }
+    // NEW 11.0 (Part G): "a brand-new player joins the table (including
+    // session start)" -- table-wide, immediate, per the notification
+    // table. Harmless when this is the very first player (nobody else is
+    // there to see it yet).
+    this._queueAnnouncement(`${player.name} has joined the table.`, 'join');
+    this.touchActivity(); // NEW 11.0 (Part H.2) -- a join is real activity
     return player;
+  }
+
+  /**
+   * NEW 11.0 (Part D): a 6-character alphanumeric code, drawn from the
+   * larger 36-character keyspace (letters + numbers) the spec calls for --
+   * not a numeric-only PIN -- specifically to make guessing impractical.
+   * Retries on the astronomically unlikely case of a collision with a
+   * code already active at this table (codes are only unique per-table,
+   * not globally, which is all §5 of the reconnect design actually needs).
+   */
+  _generateReconnectCode() {
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code;
+    do {
+      code = '';
+      for (let i = 0; i < 6; i++) code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+    } while (this.players.some((p) => p.reconnectCode === code));
+    return code;
   }
 
   /**
@@ -255,13 +337,27 @@ class GameTable {
   }
 
   /**
-   * Remove a player (e.g. on disconnect). If they were Dealer, the role
-   * auto-promotes to the next player in turn order. Any pending claim
-   * that referenced them is voided, since it can no longer be resolved
-   * as proposed.
+   * CHANGED 11.0 (Part F.5): reconciled, not retired -- the groundwork
+   * finding in the spec flagged this function as blunt (naive
+   * turn-order-first Dealer promotion, silent claim voiding) and left
+   * open whether it becomes the real mechanism Leave Table/Remove
+   * Player call. It does, with both defects fixed here. No longer
+   * called on disconnect at all (see markDisconnected()'s own section
+   * above) -- this is now exclusively the actual, permanent "delete this
+   * seat and compact positions" primitive, invoked only at the moment a
+   * departure actually takes effect (see _initiateDeparture()).
    */
   removePlayer(id) {
-    const wasDealer = this.getPlayer(id)?.isDealer === true;
+    const player = this.getPlayer(id);
+    if (!player) return;
+
+    // FIXED 11.0 (Part F.5 groundwork): proper eligibility-aware
+    // reassignment, not "whoever's first in turnOrder" -- the exact
+    // defect the spec's own groundwork flagged in the pre-11.0 version.
+    if (player.isDealer) {
+      this._reassignDealerToNextEligible(player);
+    }
+
     this.players = this.players.filter((p) => p.id !== id);
     this.turnOrder = this.turnOrder.filter((pid) => pid !== id);
 
@@ -269,19 +365,465 @@ class GameTable {
       this.currentTurnPlayerId = this.turnOrder[0] || null;
     }
 
-    if (wasDealer && this.players.length > 0) {
-      const nextDealer = this.getPlayer(this.turnOrder[0]);
-      if (nextDealer) nextDealer.isDealer = true;
+    // FIXED 11.0 (Part F.5 groundwork): a departing Player who held ONLY
+    // the approver role -- not the proposer, not an allocation recipient,
+    // i.e. no actual money stake in this claim -- no longer costs every
+    // OTHER player the whole claim. Reassign approval instead, the same
+    // "don't punish everyone else for one person leaving" principle
+    // already used for the Dealer handoff. A departing Player who WAS a
+    // real stakeholder (proposer or allocation recipient) still voids
+    // the claim outright -- the safe fallback, and, per Mike's own
+    // explicit call, not something this needs to get perfectly right in
+    // every combination: Table Owner Functions 1-3 exist as the backstop
+    // for exactly this kind of edge case.
+    if (this.pendingClaim) {
+      const isProposer = this.pendingClaim.proposerId === id;
+      const hasAllocation = this.pendingClaim.allocations.some((a) => a.playerId === id);
+      const isApprover = this.pendingClaim.approverId === id;
+      if (isProposer || hasAllocation) {
+        this.pendingClaim = null;
+      } else if (isApprover) {
+        const nextApprover = this._nextEligibleApprover(this.pendingClaim.proposerId);
+        if (nextApprover) {
+          this.pendingClaim.approverId = nextApprover;
+        } else {
+          this.pendingClaim = null;
+        }
+      }
+    }
+  }
+
+  /**
+   * NEW 11.0 (Part F.5): the same "who approves a claim" selection
+   * claimPot() itself already uses (dealer, unless the Dealer is the
+   * proposer, in which case the next hand-participant seat to their
+   * left, falling back to the next folded seat) -- factored out so
+   * removePlayer()'s reassignment can reuse it verbatim rather than
+   * re-implementing the same rule a second time.
+   */
+  _nextEligibleApprover(proposerId) {
+    const dealer = this.getDealer();
+    if (!dealer) return null;
+    if (dealer.id !== proposerId) return dealer.id;
+    const dealerIdx = this.turnOrder.indexOf(dealer.id);
+    for (let step = 1; step <= this.turnOrder.length; step++) {
+      const candidate = this.getPlayer(this.turnOrder[(dealerIdx + step) % this.turnOrder.length]);
+      if (candidate && this._isHandParticipant(candidate) && candidate.id !== dealer.id) return candidate.id;
+    }
+    for (let step = 1; step <= this.turnOrder.length; step++) {
+      const candidate = this.getPlayer(this.turnOrder[(dealerIdx + step) % this.turnOrder.length]);
+      if (candidate && !candidate.sittingOut && candidate.folded && candidate.id !== dealer.id) return candidate.id;
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------------------
+  // NEW 11.0 (the-cut-spec_v11-0.md Parts A-E): Disconnection &
+  // Reconnection. Deliberately separate from removePlayer() above --
+  // that function permanently deletes a seat and compacts positions,
+  // which is exactly wrong for a connection blip. A disconnect converges
+  // into the existing Sitting Out mechanic instead (Part C): the seat
+  // stays exactly where it is, nothing about the roster changes, and the
+  // Player returns to normal play the same way any other AFK Player does.
+  // ------------------------------------------------------------------
+
+  /**
+   * Marks a Player as disconnected (heartbeat failure or a clean socket
+   * close -- server.js decides which and calls this either way, per Part
+   * A). Does NOT sit them out, fold them, or touch the Dealer role by
+   * itself -- this only starts the clock. server.js is responsible for
+   * timing the grace period (Part B's configurable `reconnectGraceSeconds`)
+   * and calling expireDisconnectGrace() if it elapses with no reconnect.
+   */
+  markDisconnected(playerId) {
+    const player = this.getPlayer(playerId);
+    if (!player) return { ok: false, error: 'Player not found.' };
+    if (!player.connected) return { ok: false, error: 'Already disconnected.' };
+    player.connected = false;
+    player.disconnectedAt = Date.now();
+    const wasDealer = player.isDealer === true;
+    // NEW 11.0 (Part E): immediate table-wide notice the moment a
+    // Dealer's disconnect is DETECTED, not deferred to grace expiry --
+    // their absence can block the whole table's ability to proceed, so
+    // everyone needs to know right away.
+    if (wasDealer) {
+      this._queueAnnouncement(`${player.name} (the Dealer) has disconnected. The table will wait ${this.reconnectGraceSeconds}s for them to reconnect.`, 'disconnect');
+    } else {
+      // Part G: "notify on every ordinary disconnect" -- carried forward
+      // from the spec as an explicit starting assumption to revisit
+      // after beta if it proves too noisy, not a settled decision.
+      this._queueAnnouncement(`${player.name} has disconnected.`, 'disconnect');
+    }
+    return { ok: true, player, wasDealer };
+  }
+
+  /**
+   * Verifies a reconnect code and, if valid, silently resumes the Player
+   * (Part D/§4 of the original reference: no "welcome back" moment, no
+   * catch-up logic -- a fresh toRedactedState on the new socket already
+   * shows everything correctly). Deliberately requires the Player to
+   * currently be in a disconnect state (`connected === false`) -- per
+   * Part D, a currently-connected Player's code cannot be used to hijack
+   * their seat from a second device; that attempt is simply rejected here,
+   * with no distinction in the error message that would let a guesser
+   * learn whether the code was merely wrong vs. correct-but-blocked.
+   */
+  reconnectPlayer(code) {
+    const player = this.players.find((p) => p.reconnectCode === code && !p.connected);
+    if (!player) return { ok: false, error: 'Invalid reconnect code.' };
+    player.connected = true;
+    player.disconnectedAt = null;
+    // Deliberately NOT clearing sittingOut here -- see expireDisconnectGrace()'s
+    // own comment. A Player who reconnects within their grace period never
+    // had sittingOut set in the first place (silent resume); a Player who
+    // reconnects AFTER the grace period expired is, from this point on,
+    // functionally identical to any other voluntary AFK Player and returns
+    // the same way -- by clicking Sit In.
+    this._queueAnnouncement(`${player.name} has reconnected.`, 'reconnect');
+    this.touchActivity(); // NEW 11.0 (Part H.2) -- a reconnect is real activity
+    return { ok: true, playerId: player.id };
+  }
+
+  /**
+   * Called by server.js's grace-period timer when it elapses. A no-op if
+   * the Player already reconnected in the meantime (the timer isn't
+   * cancelled from inside GameTable -- server.js owns that -- but this
+   * check makes the method safe to call unconditionally regardless).
+   *
+   * Two things happen, matching Part C/E exactly:
+   *  1. Check if free, fold if facing a bet -- see _resolveAbsentPlayerTurn()'s
+   *     own comment for why this is deliberately NOT the same rule
+   *     sitOut()'s own explicit "Fold and Sit Out" uses.
+   *  2. If they were the Dealer, the role transfers via a DIRECT call to
+   *     _reassignDealerToNextEligible() -- never passTheBuck(), which
+   *     cannot serve this purpose (requires the Dealer themselves as
+   *     requester; gated to between-hands only). If this happens mid-hand
+   *     (not idle), the positional anchor splits off to preserve the
+   *     original Dealer's seat for blinds/first-to-act, per Part E.
+   */
+  expireDisconnectGrace(playerId) {
+    const player = this.getPlayer(playerId);
+    if (!player || player.connected) return { ok: false, noop: true };
+
+    let newDealerId = null;
+    const wasDealer = player.isDealer === true;
+    if (wasDealer) {
+      // NEW 11.0: mid-cycle only -- if the table is already idle
+      // (between hands/cycles), there's no "position to preserve"; the
+      // handoff behaves exactly like an ordinary Pass the Buck and the
+      // next hand simply starts from the new Dealer's seat.
+      if (!this.idle && isPhaseGated(this.profile) && this.dealerPositionAnchorId === null) {
+        this.dealerPositionAnchorId = player.id;
+      }
+      const nextDealer = this._reassignDealerToNextEligible(player);
+      if (nextDealer) {
+        newDealerId = nextDealer.id;
+        this._queueAnnouncement(`${player.name} did not reconnect in time \u2014 the Dealer role has passed to ${nextDealer.name}.`, 'disconnect');
+      } else {
+        // No eligible replacement exists (e.g. everyone else is also
+        // disconnected/sitting out) -- the disconnected Player simply
+        // stays Dealer on paper; nobody to hand it to. Mirrors
+        // passTheBuck()'s own "no eligible player" rejection rather than
+        // inventing new behavior for a degenerate case.
+        this._queueAnnouncement(`${player.name} did not reconnect in time, but no other player is available to take over as Dealer.`, 'disconnect');
+      }
+    } else {
+      this._queueAnnouncement(`${player.name} did not reconnect in time and has been moved to Sitting Out.`, 'disconnect');
     }
 
-    if (
-      this.pendingClaim &&
-      (this.pendingClaim.proposerId === id ||
-        this.pendingClaim.approverId === id ||
-        this.pendingClaim.allocations.some((a) => a.playerId === id))
-    ) {
-      this.pendingClaim = null;
+    this._resolveAbsentPlayerTurn(player);
+    player.sittingOut = true;
+    player.sitOutPending = false;
+
+    return { ok: true, wasDealer, newDealerId };
+  }
+
+  /**
+   * The actual fold bookkeeping, shared by every path that forces a fold
+   * on a Player's behalf -- extracted so there's exactly one
+   * implementation, not several that could quietly drift out of sync
+   * the way B.2 did.
+   */
+  _applyFoldBookkeeping(player) {
+    player.folded = true;
+    this._actedSinceRaise.add(player.id);
+    if (this.bettingOpen) {
+      if (this.currentTurnPlayerId === player.id) {
+        this.currentTurnPlayerId = this._nextTurnPlayerId();
+      }
+      this._maybeCloseBettingRound();
+    } else {
+      this._maybeAdvanceFromDiscardPhase();
+      this._maybeAdvanceFromDeclare();
     }
+  }
+
+  /**
+   * sitOut()'s own "Fold and Sit Out" mode: the Player explicitly chose
+   * this, so an unconditional fold (whenever they hold a live decision at
+   * all) is the correct, fair behavior -- they're the one giving up their
+   * stake, not the app doing it to them.
+   */
+  _foldForSitOut(player) {
+    if (!this._canAct(player)) return;
+    this._applyFoldBookkeeping(player);
+  }
+
+  /**
+   * NEW 11.0 (Part C): "does this Player currently owe anything to stay
+   * in the hand" -- the exact same figure the client's own "$YY to You"
+   * UI is built from (currentBetToCall - player.currentBet), so a
+   * disconnected Player is never folded out of a hand they'd have seen,
+   * a moment before losing connection, as free to just check.
+   */
+  _isFacingABet(player) {
+    return this.bettingOpen && this.currentBetToCall - player.currentBet > 0;
+  }
+
+  /**
+   * NEW 11.0 (Part C): the involuntary-timeout rule -- "check if free,
+   * fold if facing a bet" -- confirmed against industry practice
+   * (Ignition/Bovada, GGPoker, BetOnline all converge on this). This is
+   * deliberately NOT the same as _foldForSitOut() above: that's a
+   * Player's own explicit choice to fold and leave; this is something
+   * happening TO an absent Player, and folding someone who had nothing
+   * to lose by checking would be needlessly unfair to them. If they're
+   * free to check, this checks on their behalf (advancing the turn so
+   * the table isn't stuck waiting on someone who can no longer respond)
+   * without touching `folded` at all -- their hand stays completely live.
+   */
+  _resolveAbsentPlayerTurn(player) {
+    if (!this._canAct(player)) return; // no live decision to resolve at all
+    if (this._isFacingABet(player)) {
+      this._applyFoldBookkeeping(player);
+      return;
+    }
+    if (this.bettingOpen && this.currentTurnPlayerId === player.id) {
+      this._actedSinceRaise.add(player.id);
+      this.currentTurnPlayerId = this._nextTurnPlayerId();
+      this._maybeCloseBettingRound();
+    }
+    // Not currently their turn, or no betting round open at all: there is
+    // genuinely nothing to resolve right now -- they aren't holding
+    // anything up, so nothing happens (they simply stay dealt in,
+    // pending, until it's their turn or the hand moves on).
+  }
+
+  /**
+
+   * NEW 11.0 (Part B): Table-Owner-only, lives in the new Settings
+   * dialog. Table-level state (like `pot`/`dealerId`), never reset on
+   * Select. No hard bounds enforced here beyond sanity (positive number)
+   * -- the exact useful range is exactly the kind of thing the spec says
+   * "we won't know until we experience it" about.
+   */
+  setReconnectTimeout(requesterId, seconds) {
+    if (requesterId !== this.creatorId) {
+      return { ok: false, error: 'Only the Table Owner can change the reconnect timeout.' };
+    }
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) {
+      return { ok: false, error: 'Reconnect timeout must be a positive number of seconds.' };
+    }
+    this.reconnectGraceSeconds = seconds;
+    return { ok: true };
+  }
+
+  /**
+   * NEW 11.0: the answer to "whose seat is the positional anchor right
+   * now" -- the original Dealer's, if a mid-cycle emergency handoff split
+   * is currently in effect (Part E), otherwise the current Dealer's own
+   * seat, exactly as it's always worked. Every call site that used to
+   * read `dealer.id` purely for POSITION (blinds, first-to-act) reads
+   * this instead; call sites that need the actual current Dealer (for
+   * Dealer-only actions/authorization) keep using getDealer().id directly
+   * -- those are deliberately unaffected by this split.
+   */
+  _positionAnchorId() {
+    return this.dealerPositionAnchorId || this.getDealer()?.id || null;
+  }
+
+  /**
+   * NEW 11.0 (Part I audit finding): a mid-grace-period Player
+   * (`connected: false`, not yet `sittingOut`) is still a full, live
+   * participant in whatever hand is ALREADY in progress -- Part B's own
+   * "the table freezes" principle, and every existing eligibility
+   * consumer (_isHandParticipant, _canAct, _isPending, turn order,
+   * claims) already handles that correctly without any change, since
+   * none of them ever checked `connected` in the first place.
+   *
+   * What the spec text doesn't explicitly cover is a DIFFERENT moment:
+   * starting a BRAND NEW hand while someone is disconnected but hasn't
+   * timed out yet. Dealing them into a fresh hand (and assigning them an
+   * ante they have no way to post) would be strictly worse than simply
+   * waiting a little longer -- so startGame()/newHand() both block on
+   * this rather than proceeding. Deliberately scoped to ONLY those two
+   * fresh-hand entry points, not a blanket `connected` check added to
+   * _dealableActivePlayers()/_computeBlindSeats()/_autoApplyAnte(): an
+   * earlier draft of this fix tried exactly that and it would have
+   * broken _computeBlindSeats()'s other caller (openBetting()'s
+   * PreFlopBetting recomputation, which must reproduce the SAME blind
+   * assignment already used to seed real posted money at RequestAntes,
+   * even if that Player's connection status changes in between) --
+   * exactly the kind of cross-consumer regression this audit exists to
+   * catch, not sampled and missed the way the project's own core lesson
+   * warns against.
+   */
+  _anyoneDisconnected() {
+    return this.players.some((p) => !p.connected);
+  }
+
+  // ------------------------------------------------------------------
+  // NEW 11.0 (the-cut-spec_v11-0.md Part F): Voluntary and Forced
+  // Departure (Leave Table / Remove Player). Surfaced during 11.0's own
+  // review, not part of the original 10.0-era disconnect design --
+  // there was previously no way for a Player to permanently leave and
+  // free their position, distinct from simply disconnecting.
+  // ------------------------------------------------------------------
+
+  /**
+   * NEW 11.0 (Part F.1). `mode` only matters when the Player actually
+   * holds a pending stake right now (_isPending() -- the exact same gate
+   * Buy Chips already uses, per seat-player-dealer-spec.md §2's
+   * governing principle: no unresolved stake, leave immediately;
+   * otherwise, fold-and-leave-now or wait-until-cycle-close, the exact
+   * same choice Sit Out already offers).
+   */
+  leaveTable(requesterId, mode) {
+    const player = this.getPlayer(requesterId);
+    if (!player) return { ok: false, error: 'Player not found.' };
+    const result = this._initiateDeparture(player, mode);
+    if (result.ok) {
+      // Part G: "a player leaves the table -- Immediate (or at cycle
+      // close, if departure is deferred per F.1/F.4)."
+      this._queueAnnouncement(
+        result.immediate ? `${player.name} has left the table.` : `${player.name} will leave the table once the current cycle closes.`,
+        'departure'
+      );
+    }
+    return result;
+  }
+
+  /**
+   * NEW 11.0 (Part F.2). Table-Owner-only. "Force the same outcome as if
+   * the player had clicked Leave Table themselves" -- same rules, same
+   * shared implementation as leaveTable() above, just a different
+   * (Table Owner) requester and an explicit target. Closes a real gap:
+   * a Player who disconnects and never returns previously had no path
+   * to ever being cleared from the table.
+   */
+  removePlayerFromTable(requesterId, targetPlayerId, mode) {
+    if (requesterId !== this.creatorId) {
+      return { ok: false, error: 'Only the Table Owner can remove a player.' };
+    }
+    const player = this.getPlayer(targetPlayerId);
+    if (!player) return { ok: false, error: 'Player not found.' };
+    const result = this._initiateDeparture(player, mode);
+    if (result.ok) {
+      this._queueAnnouncement(
+        result.immediate
+          ? `${player.name} has been removed from the table by the Table Owner.`
+          : `${player.name} will be removed from the table by the Table Owner once the current cycle closes.`,
+        'departure'
+      );
+    }
+    return result;
+  }
+
+  /**
+   * Shared by F.1/F.2 -- see each method's own comment. `mode` is only
+   * consulted when a pending stake exists; ignored entirely otherwise
+   * (the overwhelmingly common case).
+   */
+  _initiateDeparture(player, mode) {
+    if (this._isPending(player)) {
+      if (mode !== 'foldAndLeave' && mode !== 'leaveAtCycleClose') {
+        return { ok: false, error: 'A pending stake requires choosing to fold and leave now, or leave once the current cycle closes.' };
+      }
+      if (mode === 'leaveAtCycleClose') {
+        this._deferDeparture(player);
+        return { ok: true, immediate: false };
+      }
+      // foldAndLeave: an explicit, deliberate forfeiture -- the same
+      // unconditional fold Sit Out's own "Fold and Sit Out" uses
+      // (_foldForSitOut), NOT the lenient "check if free" rule reserved
+      // for an INVOLUNTARY disconnect timeout (_resolveAbsentPlayerTurn).
+      // This is the Player's (or the Table Owner acting on their behalf,
+      // for F.2) own explicit choice to give up the stake.
+      this._foldForSitOut(player);
+    }
+
+    // NEW 11.0 (Part F.4): compaction only ever happens at a cycle
+    // boundary, never mid-cycle -- even when the departure itself was
+    // triggered mid-cycle. `this.idle` IS "we're already at a cycle
+    // boundary right now," so an immediate removal here never violates
+    // that rule. The legacy no-Game-Choice "flexible toolbox" mode has
+    // no cycle concept at all to defer to in the first place (see
+    // _setHandPhase()'s own scoping) -- departure there is always
+    // immediate, regardless of `idle`.
+    if (this.idle || !isPhaseGated(this.profile)) {
+      this.removePlayer(player.id);
+      return { ok: true, immediate: true };
+    }
+    this._deferDeparture(player);
+    return { ok: true, immediate: false };
+  }
+
+  /**
+   * NEW 11.0 (Part F.4): marks a Player for removal at the next cycle
+   * close, without touching the seat list yet. Deliberately reuses the
+   * fully-audited Sitting Out machinery (dealing exclusion, turn order,
+   * claim eligibility) instead of teaching a new status to every
+   * consumer of Player eligibility -- `pendingDeparture` itself is
+   * consulted in exactly one other place, the cycle-close hook in
+   * _setHandPhase().
+   */
+  _deferDeparture(player) {
+    player.sittingOut = true;
+    player.sitOutPending = false;
+    player.pendingDeparture = true;
+    if (player.isDealer) {
+      // Same mid-cycle positional-anchor split Part E uses for a
+      // disconnected Dealer -- the departing Player's seat is still
+      // structurally present until the cycle closes, so it remains the
+      // blinds/first-to-act anchor until then. Both the anchor and the
+      // seat itself clear together the moment the cycle actually does
+      // (_setHandPhase()).
+      if (isPhaseGated(this.profile) && this.dealerPositionAnchorId === null) {
+        this.dealerPositionAnchorId = player.id;
+      }
+      this._reassignDealerToNextEligible(player);
+    }
+  }
+
+  /**
+   * NEW 11.0 (Part F.6): Table-Owner-only, ends the entire table/
+   * session -- distinct from Function 1 (Terminate Cleanly), which only
+   * ends the current HAND and leaves the table itself intact. The
+   * actual "disconnect every socket and delete the table" mechanics are
+   * server.js's job (this class has no notion of sockets); this method
+   * is only the authorization/policy gate.
+   */
+  endGame(requesterId) {
+    if (requesterId !== this.creatorId) {
+      return { ok: false, error: 'Only the Table Owner can end the game.' };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * NEW 11.0 (Part H.2): the Table Owner's T-1-minute popup action --
+   * "offering to restart the 30-minute clock." Just touchActivity()
+   * under a permission check; kept as its own method (rather than having
+   * the client call some generic activity-ping message) so the
+   * authorization lives in exactly one place, consistent with every
+   * other Table-Owner-only function.
+   */
+  restartActivityClock(requesterId) {
+    if (requesterId !== this.creatorId) {
+      return { ok: false, error: 'Only the Table Owner can restart the inactivity clock.' };
+    }
+    this.touchActivity();
+    return { ok: true };
   }
 
   /**
@@ -511,6 +1053,23 @@ class GameTable {
     this.handPhase = phase;
     if (isPhaseGated(this.profile)) {
       this.idle = phase === 'PreGame' || phase === 'CycleComplete';
+      // NEW 11.0 (Part E): "once the cycle closes, the split ends" --
+      // this is the one place a cycle is ever recognized as closing, so
+      // it's the correct, single place to clear a mid-cycle emergency
+      // Dealer-handoff's positional-anchor split. A no-op the overwhelming
+      // majority of the time (dealerPositionAnchorId is already null).
+      if (phase === 'PreGame' || phase === 'CycleComplete') {
+        this.dealerPositionAnchorId = null;
+        // NEW 11.0 (Part F.4): the actual moment any Player marked
+        // pendingDeparture (a mid-cycle Leave Table/Remove Player,
+        // deferred per F.4) really leaves and the seat list compacts --
+        // deferred here specifically so mid-cycle positions never shift
+        // while a hand is still being played out, the exact same
+        // boundary the Part E anchor split above waits for. Collect ids
+        // first, then remove, since removePlayer() mutates this.players.
+        const departingIds = this.players.filter((p) => p.pendingDeparture).map((p) => p.id);
+        for (const id of departingIds) this.removePlayer(id);
+      }
     }
   }
 
@@ -537,7 +1096,11 @@ class GameTable {
     // snapshot Function 2 restores from.
     this._preGameSnapshot = snapshotPlayers(this.players);
     const dealer = this.getDealer();
-    if (dealer) this._autoApplyAnte(dealer.id);
+    // CHANGED 11.0 (Part E): use the positional anchor, not necessarily
+    // the current Dealer -- if a mid-cycle emergency handoff split is in
+    // effect, a subsequent hand within the SAME cycle (ReAnteable games)
+    // must still seed blinds/ante from the ORIGINAL Dealer's seat.
+    if (dealer) this._autoApplyAnte(this._positionAnchorId());
     this.killHandConfirmPending = false; // NEW 8.2 -- safety net; the confirm/cancel pair should already have cleared this directly
     this._setHandPhase('RequestAntes');
     // BUG FIX 9.1 (found while building refund-scenario test fixtures --
@@ -2074,7 +2637,14 @@ class GameTable {
     const dealerIdx = this.turnOrder.indexOf(currentDealer.id);
     for (let step = 1; step <= this.turnOrder.length; step++) {
       const candidate = this.getPlayer(this.turnOrder[(dealerIdx + step) % this.turnOrder.length]);
-      if (candidate && !candidate.sittingOut && candidate.id !== currentDealer.id) {
+      // NEW 11.0 (Part E, per §8's "multiple simultaneous disconnects
+      // generalize correctly" principle): a currently-disconnected Player
+      // is just as ineligible to receive the Dealer role as a sitting-out
+      // one -- added when this function gained a second, disconnect-
+      // triggered caller (expireDisconnectGrace()) alongside passTheBuck().
+      // Doesn't affect passTheBuck() itself: a connected Player is always
+      // `connected === true`, so this is a no-op for that caller.
+      if (candidate && !candidate.sittingOut && candidate.connected !== false && candidate.id !== currentDealer.id) {
         nextDealer = candidate;
         break;
       }
@@ -2135,6 +2705,13 @@ class GameTable {
     if (!this.gameChoiceId) {
       return { ok: false, error: 'Select a Game Choice first.' };
     }
+    // NEW 11.0 (Part I audit finding, see _anyoneDisconnected()'s own
+    // comment): don't deal a fresh hand while anyone is still mid-grace-
+    // period -- wait for them, same "table freezes" principle Part B
+    // already applies to an in-progress hand.
+    if (this._anyoneDisconnected()) {
+      return { ok: false, error: 'A player is disconnected -- wait for them to reconnect, or for their grace period to expire, before starting a new hand.' };
+    }
     if (isPhaseGated(this.profile)) {
       if (this.handPhase !== 'PreGame' && this.handPhase !== 'CycleComplete') {
         return { ok: false, error: 'You can only start while idle (no hand in progress).' };
@@ -2146,7 +2723,11 @@ class GameTable {
       return { ok: false, error: 'You can only start while idle (no hand in progress).' };
     }
     this._performFullReset({ clearFolded: true });
-    this._autoApplyAnte(dealer.id);
+    // NOTE 11.0: _positionAnchorId() is a no-op passthrough to dealer.id
+    // here -- the Part E split only ever gets set for phase-gated
+    // profiles (see expireDisconnectGrace()); kept for consistency with
+    // every other _autoApplyAnte()/_computeBlindSeats() call site.
+    this._autoApplyAnte(this._positionAnchorId());
     return { ok: true };
   }
 
@@ -2180,6 +2761,11 @@ class GameTable {
       return { ok: false, error: 'Only the Dealer can start a new hand.' };
     }
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+    // NEW 11.0 (Part I audit finding) -- see startGame()'s identical
+    // guard and _anyoneDisconnected()'s own comment for the reasoning.
+    if (this._anyoneDisconnected()) {
+      return { ok: false, error: 'A player is disconnected -- wait for them to reconnect, or for their grace period to expire, before starting a new hand.' };
+    }
     // CHANGED 8.0 (§2): reads the capability flag instead of naming
     // Draw and Stud explicitly -- a future profile that sets
     // usesReAnteableLoop: true in its own table picks this up
@@ -2551,7 +3137,9 @@ class GameTable {
     if (this.bettingOpen) {
       return { ok: false, error: 'A betting round is already open.' };
     }
-    const blindSeats = isHoldem && this.handPhase === 'PreFlopBetting' ? this._computeBlindSeats(dealer.id) : [];
+    // CHANGED 11.0 (Part E): positional anchor, not necessarily the
+    // current Dealer -- see _positionAnchorId()'s own comment.
+    const blindSeats = isHoldem && this.handPhase === 'PreFlopBetting' ? this._computeBlindSeats(this._positionAnchorId()) : [];
     const [smallBlindPlayer, bigBlindPlayer] = blindSeats;
     // NEW 7.0 (§6.8): Bring In applies only on Stud's very first betting
     // round of the hand -- simpler than Hold'em's blind seeding, since no
@@ -2616,7 +3204,7 @@ class GameTable {
       // works. Already validated above to be active and eligible.
       this.currentTurnPlayerId = this.openingBettorId;
     } else {
-      let anchorId = dealer.id; // default: left of Dealer
+      let anchorId = this._positionAnchorId(); // default: left of the positional anchor (CHANGED 11.0, Part E)
       if (bigBlindPlayer) anchorId = bigBlindPlayer.id;
       const anchorIdx = this.turnOrder.indexOf(anchorId);
       this.currentTurnPlayerId =
@@ -3955,23 +4543,11 @@ class GameTable {
     // incorrectly zero out real pot equity, a worse bug than the one
     // being fixed. _canAct() is exactly this distinction: dealt in, not
     // already folded/sitting out, and NOT all-in/bettingCapped.
-    if (this._canAct(player)) {
-      player.folded = true;
-      this._actedSinceRaise.add(player.id);
-      if (this.bettingOpen) {
-        if (this.currentTurnPlayerId === player.id) {
-          this.currentTurnPlayerId = this._nextTurnPlayerId();
-        }
-        this._maybeCloseBettingRound();
-      } else {
-        // Outside an open betting round -- this fold may now satisfy a
-        // non-betting phase's own "every hand participant has acted"
-        // completion check (Discard/Declare). Both are cheap, safely
-        // no-ops unless their own profile/phase guard matches.
-        this._maybeAdvanceFromDiscardPhase();
-        this._maybeAdvanceFromDeclare();
-      }
-    }
+    // NEW 11.0: this unconditional-fold rule is _foldForSitOut() below --
+    // sitOut()'s own explicit "Fold and Sit Out" choice, distinct from
+    // the involuntary "check if free" rule expireDisconnectGrace() uses
+    // (_resolveAbsentPlayerTurn()) for a disconnect timeout.
+    this._foldForSitOut(player);
     player.sittingOut = true;
     player.sitOutPending = false;
     return { ok: true };
@@ -4031,6 +4607,23 @@ class GameTable {
       code: this.code,
       name: this.name || this.code,
       creatorId: this.creatorId,
+      // NEW 11.0 (Part B): the Table Owner Settings dialog's own value --
+      // exposed to everyone (harmless, and the client needs it to render
+      // "will fold in Ns" countdown text for any disconnected Player, not
+      // just the Table Owner).
+      reconnectTimeoutSeconds: this.reconnectGraceSeconds,
+      // NEW 11.0 (Part H.2): when the table will auto-close if no real
+      // activity happens before then. The client derives its own T-5min
+      // banner and T-1min Table-Owner popup purely by comparing this to
+      // its own clock -- never pushed as separate one-off messages.
+      tableCloseAt: this.lastActivityAt + this.inactivityTimeoutSeconds * 1000,
+      // NEW 11.0 (Part D): Table Owner visibility into every seated
+      // Player's own reconnect code, per the spec's explicit "read it to
+      // them if their phone dies" rationale. `null` for everyone else --
+      // a Player's own code is instead sent to them directly, once, at
+      // join/reconnect time (see server.js), never repeated in the
+      // broadcast state where every other seated Player would see it too.
+      reconnectCodes: forPlayerId === this.creatorId ? Object.fromEntries(this.players.map((p) => [p.id, p.reconnectCode])) : null,
       suggestedBuyIn: this.suggestedBuyIn,
       includeJokers: this.includeJokers,
       deckCount: this.deck.length,
@@ -4109,6 +4702,11 @@ class GameTable {
       // of both cases looking identical (disabled, empty dropdown, no
       // explanation) the way they did before this version.
       anyHandParticipantCanAct: this.players.some((p) => this._isHandParticipant(p) && this._canAct(p)),
+      // NEW 11.0 (Part I/Standing Convention): the same answer
+      // startGame()/newHand() enforce server-side -- exposed so the
+      // client can disable Start/New Hand with an explanation instead of
+      // leaving them clickable and rejected after the fact.
+      anyoneDisconnected: this._anyoneDisconnected(),
       // NEW 10.4 (B.2 replacement): who's stuck (owes more than they
       // have) right now, if anyone -- drives the Dealer's Misdeal
       // control visibility/enablement, per the Standing Convention
@@ -4147,6 +4745,12 @@ class GameTable {
         folded: p.folded,
         revealed: p.revealed,
         sittingOut: p.sittingOut,
+        // NEW 11.0 (Part A/B): server-computed, client reads directly --
+        // per the Standing Convention, never re-derived. `disconnectDeadline`
+        // is a wall-clock ms timestamp (or null) so the client can render a
+        // live countdown without the server needing to push a tick.
+        connected: p.connected,
+        disconnectDeadline: p.connected ? null : p.disconnectedAt + this.reconnectGraceSeconds * 1000,
         // NEW 9.6 (§9): computed, not persisted -- true whenever this
         // player's own $0 chips is why they're excluded from the current/
         // next hand, distinct from a genuine (voluntary or disconnected)
@@ -4177,6 +4781,7 @@ class GameTable {
         // server-side call sites did.
         isHandParticipant: this._isHandParticipant(p),
         sitInPending: p.sitInPending,
+        pendingDeparture: p.pendingDeparture, // NEW 11.0 (Part F.4)
         oweAnte: p.oweAnte,
         discardCountThisHand: p.discardCountThisHand,
         discardPhaseActed: p.discardPhaseActed,

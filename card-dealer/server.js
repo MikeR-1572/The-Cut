@@ -27,6 +27,27 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_NAME_LENGTH = 24;
 
+// NEW 11.0 (Part A): heartbeat detection. Ping every 5s; a socket that
+// misses 2 pings in a row (~10-12s of silence) is treated as
+// disconnected. Deliberately NOT the same number as the ~30s grace
+// period (Part B) -- this is purely "is the connection alive," a
+// separate question from "how long do we wait for a person to come
+// back." Server-level only, not Table-Owner-configurable -- see the
+// project's own discussion of why: too aggressive risks false positives
+// on a merely laggy connection, too lax defeats the point of having a
+// heartbeat at all, and unlike the grace period this isn't a matter of
+// taste a Table Owner has the context to safely tune themselves.
+const HEARTBEAT_INTERVAL_MS = 5000;
+const MAX_MISSED_PINGS = 2;
+
+// NEW 11.0 (Part D): reconnect-code rate limiting, tracked per IP, in
+// memory (no new persistence layer, same ephemeral style as everything
+// else in this app). Numbers per the spec's own proposed shape -- not
+// locked in.
+const RECONNECT_RATE_LIMIT_MAX_ATTEMPTS = 5;
+const RECONNECT_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RECONNECT_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -72,6 +93,46 @@ const wss = new WebSocket.Server({ server });
 /** playerId -> ws, so we can push to specific players (e.g. dealError, joined). */
 const playerSockets = new Map();
 
+// NEW 11.0 (Part B): playerId -> grace-period Timeout handle, so a
+// reconnect (or a second disconnect signal for the same Player) can
+// cancel/replace the pending expireDisconnectGrace() call.
+const disconnectTimers = new Map();
+
+// NEW 11.0 (Part D): ip -> { attempts: [timestamps], cooldownUntil }.
+const reconnectAttemptsByIp = new Map();
+
+function clientIp(req) {
+  // Railway (and most platforms) sit behind a proxy -- the real client
+  // address is the first entry of x-forwarded-for when present.
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) return forwarded.split(',')[0].trim();
+  return req.socket.remoteAddress || 'unknown';
+}
+
+/**
+ * NEW 11.0 (Part D). Returns { limited: true } if this IP is currently
+ * in a cooldown and should be rejected outright without even checking
+ * the code; otherwise records this attempt and returns { limited: false }.
+ * Deliberately silent either way at the call site -- no table-wide alert
+ * on a failed/blocked attempt, per the spec's own explicit decision.
+ */
+function checkReconnectRateLimit(ip) {
+  const now = Date.now();
+  let entry = reconnectAttemptsByIp.get(ip);
+  if (!entry) {
+    entry = { attempts: [], cooldownUntil: 0 };
+    reconnectAttemptsByIp.set(ip, entry);
+  }
+  if (entry.cooldownUntil > now) return { limited: true };
+  entry.attempts = entry.attempts.filter((t) => now - t < RECONNECT_RATE_LIMIT_WINDOW_MS);
+  entry.attempts.push(now);
+  if (entry.attempts.length > RECONNECT_RATE_LIMIT_MAX_ATTEMPTS) {
+    entry.cooldownUntil = now + RECONNECT_RATE_LIMIT_COOLDOWN_MS;
+    return { limited: true };
+  }
+  return { limited: false };
+}
+
 function send(ws, type, payload = {}) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type, ...payload }));
@@ -83,6 +144,39 @@ function broadcastGameTableState(gameTable) {
   for (const player of gameTable.players) {
     send(playerSockets.get(player.id), 'gameTableState', { gameTable: gameTable.toRedactedState(player.id) });
   }
+}
+
+/**
+ * NEW 11.0 (Parts A-C): the single place a Player's connection is ever
+ * recognized as lost, called both by a clean 'close' event (Part A: "a
+ * clean, well-behaved close should still be recognized immediately") and
+ * by heartbeat failure -- both route through the exact same phase-aware
+ * handling now, replacing the old unconditional removePlayer() call.
+ * Safe to call more than once for the same Player (e.g. a clean close
+ * arriving right after a heartbeat timeout already fired): markDisconnected()
+ * itself is idempotent and returns { ok: false } on the second call, so
+ * this is a no-op past that point -- no duplicate timers, no duplicate
+ * announcements.
+ */
+function handleConnectionLost(gameTableCode, playerId) {
+  const gameTable = gameTables.get(gameTableCode);
+  if (!gameTable) return;
+  const result = gameTable.markDisconnected(playerId);
+  if (!result.ok) return; // already disconnected -- nothing further to do
+  playerSockets.delete(playerId);
+  broadcastGameTableState(gameTable);
+  broadcastAnnouncements(gameTable);
+
+  const timer = setTimeout(() => {
+    disconnectTimers.delete(playerId);
+    const expiry = gameTable.expireDisconnectGrace(playerId);
+    if (!expiry.ok) return; // reconnected before the timer fired
+    // GameTable persists even if now empty (spec §4.5) -- broadcasting
+    // to zero remaining connected sockets is harmless.
+    broadcastGameTableState(gameTable);
+    broadcastAnnouncements(gameTable);
+  }, gameTable.reconnectGraceSeconds * 1000);
+  disconnectTimers.set(playerId, timer);
 }
 
 /**
@@ -120,8 +214,13 @@ function gameTableForSocket(ws) {
   return gameTableCode ? gameTables.get(gameTableCode) : null;
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   ws.meta = { playerId: null, gameTableCode: null };
+  // NEW 11.0 (Part A): heartbeat bookkeeping for this socket.
+  ws.missedPings = 0;
+  ws.on('pong', () => {
+    ws.missedPings = 0;
+  });
 
   ws.on('message', (raw) => {
     let msg;
@@ -131,6 +230,20 @@ wss.on('connection', (ws) => {
       return; // ignore malformed frames
     }
     const { type, ...payload } = msg || {};
+
+    // NEW 11.0 (Part H.2): any message against an already-established
+    // table context counts as real activity -- resets the inactivity
+    // clock generically, rather than sprinkling touchActivity() calls
+    // through every individual game-action method in gameTable.js. This
+    // is deliberately a session/connection-layer concern, not a
+    // game-rule one. createGameTable/joinGameTable/reconnectToGameTable
+    // aren't covered here (ws.meta isn't populated yet at this point for
+    // those) -- each touches activity explicitly inside GameTable itself
+    // instead (addPlayer()/reconnectPlayer()).
+    if (ws.meta.gameTableCode) {
+      const activeTable = gameTables.get(ws.meta.gameTableCode);
+      if (activeTable) activeTable.touchActivity();
+    }
 
     // NOTE 8.0 (ARCHITECTURE_v8.md §9): the wire protocol is now fully
     // renamed too -- `createRoom`/`joinRoom`/`roomState`/`roomCode`/the
@@ -237,22 +350,62 @@ wss.on('connection', (ws) => {
         return handleSitOut(ws, payload);
       case 'sitIn':
         return handleSitIn(ws);
+      case 'reconnectToGameTable':
+        return handleReconnectToGameTable(ws, payload, req);
+      case 'setReconnectTimeout':
+        return handleSetReconnectTimeout(ws, payload);
+      case 'leaveTable':
+        return handleLeaveTable(ws, payload);
+      case 'removePlayerFromTable':
+        return handleRemovePlayerFromTable(ws, payload);
+      case 'endGame':
+        return handleEndGame(ws);
+      case 'restartActivityClock':
+        return handleRestartActivityClock(ws);
       default:
         return; // unknown message type: ignore
     }
   });
 
+  // NEW 11.0 (Part A): a clean, well-behaved close (tab closed, page
+  // navigated away) is recognized immediately -- no reason to wait out a
+  // heartbeat timeout for the easy case -- but now routed through the
+  // exact same phase-aware handleConnectionLost() the heartbeat-failure
+  // path uses, instead of straight into the old, blunt removePlayer().
+  // Safe even if a heartbeat timeout already fired for this same socket
+  // moments earlier (see handleConnectionLost()'s own comment).
   ws.on('close', () => {
     const { playerId, gameTableCode } = ws.meta;
     if (!playerId || !gameTableCode) return;
-    playerSockets.delete(playerId);
-    const gameTable = gameTables.get(gameTableCode);
-    if (!gameTable) return;
-    gameTable.removePlayer(playerId);
-    // GameTable persists even if now empty (spec §4.5) -- we simply stop broadcasting.
-    if (gameTable.players.length > 0) broadcastGameTableState(gameTable);
+    handleConnectionLost(gameTableCode, playerId);
   });
 });
+
+// NEW 11.0 (Part A): the heartbeat loop itself. Every player's socket is
+// pinged on the same shared interval; a socket that hasn't answered with
+// a pong in MAX_MISSED_PINGS consecutive intervals is treated as
+// disconnected via the exact same handleConnectionLost() path a clean
+// close uses, then terminated (its own 'close' event will fire from
+// that, but handleConnectionLost() is idempotent -- see its own comment
+// -- so this is safe).
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.missedPings >= MAX_MISSED_PINGS) {
+      const { playerId, gameTableCode } = ws.meta || {};
+      if (playerId && gameTableCode) handleConnectionLost(gameTableCode, playerId);
+      return ws.terminate();
+    }
+    ws.missedPings = (ws.missedPings || 0) + 1;
+    try {
+      ws.ping();
+    } catch {
+      // Socket already in a bad state -- the next interval's missed-ping
+      // count (or a 'close'/'error' event) will catch it.
+    }
+  });
+}, HEARTBEAT_INTERVAL_MS);
+// Doesn't keep the process alive on its own past a graceful shutdown.
+heartbeatInterval.unref?.();
 
 // --- Handlers, one per protocol message type ---------------------------
 
@@ -277,8 +430,9 @@ function handleCreateGameTable(ws, { playerName, tableName, suggestedBuyIn }) {
     if (Number.isFinite(amount)) gameTable.setSuggestedBuyIn(playerId, Math.round(amount));
   }
 
-  send(ws, 'joined', { playerId, gameTableCode: code });
+  send(ws, 'joined', { playerId, gameTableCode: code, reconnectCode: gameTable.getPlayer(playerId).reconnectCode });
   broadcastGameTableState(gameTable);
+  broadcastAnnouncements(gameTable); // FIXED (found while re-verifying the live smoke test after the review pass): Part G's "player joined" announcement was queued but never actually drained/sent here
 }
 
 function handleJoinGameTable(ws, { gameTableCode, playerName }) {
@@ -309,8 +463,9 @@ function handleJoinGameTable(ws, { gameTableCode, playerName }) {
   playerSockets.set(playerId, ws);
   ws.meta = { playerId, gameTableCode: code };
 
-  send(ws, 'joined', { playerId, gameTableCode: code });
+  send(ws, 'joined', { playerId, gameTableCode: code, reconnectCode: gameTable.getPlayer(playerId).reconnectCode });
   broadcastGameTableState(gameTable);
+  broadcastAnnouncements(gameTable); // FIXED -- same gap as handleCreateGameTable above
 }
 
 function handleDeal(ws, { cardsPerPlayer, faceUp }) {
@@ -723,6 +878,182 @@ function handleSitIn(ws) {
   if (!result.ok) return send(ws, 'dealError', { message: result.error });
   broadcastGameTableState(gameTable);
 }
+
+/**
+ * NEW 11.0 (Part D). Two entry paths lead here on the client side (the
+ * "Re-Join a Table" box, and a `?rejoin=CODE` URL param read on load) --
+ * both funnel into this one message type server-side, exactly per spec
+ * ("both check the same code server-side").
+ */
+function handleReconnectToGameTable(ws, { gameTableCode, code }, req) {
+  const ip = clientIp(req);
+  const { limited } = checkReconnectRateLimit(ip);
+  // Deliberately the SAME generic error for rate-limited vs. wrong-code
+  // vs. table-not-found -- no distinction that would help a guesser learn
+  // anything about which case they hit.
+  const GENERIC_ERROR = 'Unable to reconnect with that code. Check the code and try again.';
+  if (limited) return send(ws, 'reconnectError', { message: GENERIC_ERROR });
+
+  const tableCode = (typeof gameTableCode === 'string' ? gameTableCode : '').trim().toUpperCase();
+  const gameTable = gameTables.get(tableCode);
+  const trimmedCode = (typeof code === 'string' ? code : '').trim().toUpperCase();
+  if (!gameTable || !trimmedCode) return send(ws, 'reconnectError', { message: GENERIC_ERROR });
+
+  const result = gameTable.reconnectPlayer(trimmedCode);
+  if (!result.ok) return send(ws, 'reconnectError', { message: GENERIC_ERROR });
+
+  const { playerId } = result;
+  const existingTimer = disconnectTimers.get(playerId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    disconnectTimers.delete(playerId);
+  }
+  playerSockets.set(playerId, ws);
+  ws.meta = { playerId, gameTableCode: tableCode };
+
+  send(ws, 'joined', { playerId, gameTableCode: tableCode, reconnectCode: gameTable.getPlayer(playerId).reconnectCode });
+  broadcastGameTableState(gameTable);
+  broadcastAnnouncements(gameTable);
+}
+
+function handleSetReconnectTimeout(ws, { seconds }) {
+  const gameTable = gameTableForSocket(ws);
+  if (!gameTable) return;
+  const result = gameTable.setReconnectTimeout(ws.meta.playerId, Number(seconds));
+  if (!result.ok) return send(ws, 'dealError', { message: result.error });
+  broadcastGameTableState(gameTable);
+}
+
+/** NEW 11.0 (Part F.1). */
+function handleLeaveTable(ws, { mode }) {
+  const gameTable = gameTableForSocket(ws);
+  if (!gameTable) return;
+  const playerId = ws.meta.playerId;
+  const result = gameTable.leaveTable(playerId, mode);
+  if (!result.ok) return send(ws, 'dealError', { message: result.error });
+  if (result.immediate) {
+    // Their own seat is already gone -- tell their client to reset back
+    // to the landing page. Unlike a lost connection, this was clean and
+    // deliberate, so there's nothing for handleConnectionLost() to do.
+    send(ws, 'leftTable', {});
+    playerSockets.delete(playerId);
+    ws.meta = { playerId: null, gameTableCode: null };
+  }
+  broadcastGameTableState(gameTable);
+  broadcastAnnouncements(gameTable);
+}
+
+/** NEW 11.0 (Part F.2). */
+function handleRemovePlayerFromTable(ws, { targetPlayerId, mode }) {
+  const gameTable = gameTableForSocket(ws);
+  if (!gameTable) return;
+  const targetSocket = playerSockets.get(targetPlayerId);
+  const result = gameTable.removePlayerFromTable(ws.meta.playerId, targetPlayerId, mode);
+  if (!result.ok) return send(ws, 'dealError', { message: result.error });
+  const timer = disconnectTimers.get(targetPlayerId);
+  if (timer) {
+    clearTimeout(timer);
+    disconnectTimers.delete(targetPlayerId);
+  }
+  if (result.immediate) {
+    send(targetSocket, 'leftTable', {});
+    playerSockets.delete(targetPlayerId);
+    if (targetSocket) targetSocket.meta = { playerId: null, gameTableCode: null };
+  }
+  broadcastGameTableState(gameTable);
+  broadcastAnnouncements(gameTable);
+}
+
+/**
+ * NEW 11.0 (Part F.6, reused by Part H.2's own enforcement below): the
+ * actual table teardown -- every seated Player's socket is notified
+ * (with a caller-supplied reason) and disassociated, every pending
+ * disconnect timer for this table is cleared, and the GameTable itself
+ * is deleted from the registry. Distinct from handleTerminateGameCleanly
+ * (Function 1), which only force-ends the current hand and leaves
+ * everything else, including every socket mapping, completely untouched.
+ */
+function teardownTable(gameTableCode, reasonMessage) {
+  const gameTable = gameTables.get(gameTableCode);
+  if (!gameTable) return;
+  for (const player of gameTable.players) {
+    const socket = playerSockets.get(player.id);
+    send(socket, 'tableEnded', { message: reasonMessage });
+    playerSockets.delete(player.id);
+    const timer = disconnectTimers.get(player.id);
+    if (timer) {
+      clearTimeout(timer);
+      disconnectTimers.delete(player.id);
+    }
+    if (socket) socket.meta = { playerId: null, gameTableCode: null };
+  }
+  gameTables.delete(gameTableCode);
+  zeroConnectionSince.delete(gameTableCode);
+}
+
+function handleEndGame(ws) {
+  const gameTable = gameTableForSocket(ws);
+  if (!gameTable) return;
+  const result = gameTable.endGame(ws.meta.playerId);
+  if (!result.ok) return send(ws, 'dealError', { message: result.error });
+  teardownTable(ws.meta.gameTableCode, 'The Table Owner has ended this table.');
+}
+
+/** NEW 11.0 (Part H.2). */
+function handleRestartActivityClock(ws) {
+  const gameTable = gameTableForSocket(ws);
+  if (!gameTable) return;
+  const result = gameTable.restartActivityClock(ws.meta.playerId);
+  if (!result.ok) return send(ws, 'dealError', { message: result.error });
+  broadcastGameTableState(gameTable);
+}
+
+// NEW 11.0 (Part H.1/H.2): table lifecycle. Checked on a shared sweep
+// rather than a timer per table -- simpler, and imprecision on the order
+// of this interval is completely fine at a 30-60 MINUTE timescale.
+const LIFECYCLE_SWEEP_INTERVAL_MS = 60 * 1000;
+// Part H.1: "30-60 minutes... not fully locked" -- 45 is the midpoint,
+// same "we won't know until we experience it" posture as every other
+// timer in this spec.
+const ZERO_CONNECTION_TIMEOUT_MS = 45 * 60 * 1000;
+/** gameTableCode -> timestamp the table FIRST had zero connected players, or absent if it currently has at least one. */
+const zeroConnectionSince = new Map();
+
+function runLifecycleSweep() {
+  const now = Date.now();
+  for (const [code, gameTable] of gameTables) {
+    // Part H.1: zero-players-CONNECTED timeout -- deliberately distinct
+    // from H.2 below (idle-but-still-connected). A Player who's merely
+    // mid-disconnect-grace still counts as "connected" was true a moment
+    // ago, but what matters here is the CURRENT connected flag -- if
+    // literally nobody currently has a live socket, the clock runs.
+    const anyoneConnected = gameTable.players.some((p) => p.connected);
+    if (anyoneConnected) {
+      zeroConnectionSince.delete(code);
+    } else {
+      if (!zeroConnectionSince.has(code)) zeroConnectionSince.set(code, now);
+      else if (now - zeroConnectionSince.get(code) >= ZERO_CONNECTION_TIMEOUT_MS) {
+        // Nobody is connected to notify -- just wipe it.
+        gameTables.delete(code);
+        zeroConnectionSince.delete(code);
+        continue;
+      }
+    }
+
+    // Part H.2: idle-but-connected inactivity timeout. tableCloseAt is
+    // the same server-computed fact toRedactedState already exposes for
+    // the client's own T-5/T-1 banner and popup -- enforced here as the
+    // actual, authoritative close, since a client-side timer alone could
+    // never be trusted to reliably close the table on its own.
+    const tableCloseAt = gameTable.lastActivityAt + gameTable.inactivityTimeoutSeconds * 1000;
+    if (now >= tableCloseAt) {
+      teardownTable(code, 'This table closed due to inactivity.');
+    }
+  }
+}
+
+const lifecycleSweepInterval = setInterval(runLifecycleSweep, LIFECYCLE_SWEEP_INTERVAL_MS);
+lifecycleSweepInterval.unref?.();
 
 server.listen(PORT, () => {
   console.log(`Card dealer server listening on http://localhost:${PORT}`);

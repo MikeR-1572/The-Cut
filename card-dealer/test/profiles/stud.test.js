@@ -1011,6 +1011,12 @@ test('Baseball chaining: a Free-priced chained card auto-resolves recursively, q
     ],
     ['3', '4']
   );
+  // CHANGED 11.0: drain and discard the setup-phase announcements (both
+  // players' own "has joined the table" notices, NEW 11.0 Part G) before
+  // exercising the deal-interrupt chain this test actually cares about --
+  // a real server.js session would already have broadcast (and thus
+  // drained) those long before this deal() ever happened.
+  room.drainAnnouncements();
   const result = room.deal(3, 'p1'); // both 4s are Free -- the whole chain resolves inline, no pause at all
   assert.strictEqual(result.ok, true);
   assert.strictEqual(room._pendingDealInterrupt, null);

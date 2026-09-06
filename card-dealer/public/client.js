@@ -188,6 +188,20 @@
     settingsReconnectCodes: document.getElementById('settings-reconnect-codes'),
     btnSettingsClose: document.getElementById('btn-settings-close'),
 
+    // NEW 11.1 (Testing dialog)
+    btnOpenTestingDialog: document.getElementById('btn-open-testing-dialog'),
+    testingDialog: document.getElementById('testing-dialog'),
+    testingForceDisconnectSelect: document.getElementById('testing-force-disconnect-select'),
+    btnTestingForceDisconnect: document.getElementById('btn-testing-force-disconnect'),
+    btnTestingForceInactivity: document.getElementById('btn-testing-force-inactivity'),
+    btnTestingClose: document.getElementById('btn-testing-close'),
+
+    // NEW 11.1 (Fix 2): reusable app-styled confirm, replacing window.confirm()
+    appConfirmDialog: document.getElementById('app-confirm-dialog'),
+    appConfirmMessage: document.getElementById('app-confirm-message'),
+    btnAppConfirmOk: document.getElementById('btn-app-confirm-ok'),
+    btnAppConfirmCancel: document.getElementById('btn-app-confirm-cancel'),
+
     suggestedBuyinDialog: document.getElementById('suggested-buyin-dialog'),
     suggestedBuyinInput: document.getElementById('suggested-buyin-input'),
     btnSuggestedBuyinCancel: document.getElementById('btn-suggested-buyin-cancel'),
@@ -631,6 +645,47 @@
     el.lobbyError.hidden = true;
   }
 
+  /**
+   * NEW 11.1 (Fix 2): app-styled replacement for window.confirm(), used
+   * at every site the native browser confirm used to appear (nine of
+   * them, per the spec) -- no native confirm() left anywhere in the app
+   * after this. Returns a Promise<boolean>: true if the affirmative
+   * button was clicked, false for Cancel, Escape, or any other
+   * dismissal. Labels are customizable since a couple of call sites are
+   * a genuine two-option choice (e.g. "Fold Now" vs "Wait Until Cycle
+   * Closes"), not a plain destructive yes/no.
+   */
+  function appConfirm(message, { confirmLabel = 'Confirm', cancelLabel = 'Cancel' } = {}) {
+    return new Promise((resolve) => {
+      el.appConfirmMessage.textContent = message;
+      el.btnAppConfirmOk.textContent = confirmLabel;
+      el.btnAppConfirmCancel.textContent = cancelLabel;
+      let settled = false;
+      function cleanup(result) {
+        if (settled) return;
+        settled = true;
+        el.btnAppConfirmOk.removeEventListener('click', onOk);
+        el.btnAppConfirmCancel.removeEventListener('click', onCancel);
+        el.appConfirmDialog.removeEventListener('close', onClose);
+        if (el.appConfirmDialog.open) el.appConfirmDialog.close();
+        resolve(result);
+      }
+      function onOk() {
+        cleanup(true);
+      }
+      function onCancel() {
+        cleanup(false);
+      }
+      function onClose() {
+        cleanup(false); // Escape, or any other native close path -- treated the same as Cancel
+      }
+      el.btnAppConfirmOk.addEventListener('click', onOk);
+      el.btnAppConfirmCancel.addEventListener('click', onCancel);
+      el.appConfirmDialog.addEventListener('close', onClose);
+      el.appConfirmDialog.showModal();
+    });
+  }
+
   // ---- table actions ----
 
   el.btnDeal.addEventListener('click', () => {
@@ -802,8 +857,8 @@
   // emergency-bail-out action, not a routine one -- a confirm() gut
   // check, matching Terminate/Restore's own pattern, rather than firing
   // silently on a single click.
-  el.btnMisdeal.addEventListener('click', () => {
-    if (!window.confirm('Misdeal this hand? A seated player owes more than they have and can never post.')) return;
+  el.btnMisdeal.addEventListener('click', async () => {
+    if (!(await appConfirm('Misdeal this hand? A seated player owes more than they have and can never post.'))) return;
     send('misdealStuckAntes');
   });
 
@@ -1082,7 +1137,7 @@
 
   // ---- Leave Table (NEW 11.0, the-cut-spec_v11-0.md Part F.1) ----
 
-  el.btnLeaveTable.addEventListener('click', () => {
+  el.btnLeaveTable.addEventListener('click', async () => {
     hideTableError();
     const me = state.lastGameTable?.players.find((p) => p.id === state.playerId);
     if (!me) return;
@@ -1093,7 +1148,7 @@
       // not just a button tooltip -- no need to set it here.
       el.leaveTableDialog.showModal();
     } else {
-      if (!window.confirm('Leave the table? Your chips will be lost.')) return;
+      if (!(await appConfirm('Leave the table? Your chips will be lost.'))) return;
       send('leaveTable', { mode: 'foldAndLeave' }); // mode ignored server-side -- no pending stake
     }
   });
@@ -1334,9 +1389,14 @@
   // Ticks independently of state broadcasts -- see renderInactivityWarning()'s
   // own comment for why relying only on new gameTableState messages
   // wouldn't reliably cross the T-5/T-1 thresholds on a truly idle table.
+  // CHANGED 11.1 (Fix 3, Issue A): was 5000ms, which was fine for the
+  // T-5 banner's coarse "about N minutes" wording but the wrong
+  // granularity for the T-1 popup's own live per-second countdown text.
+  // Dropped to 1000ms -- this is a pure re-render from already-known
+  // state, no new network call, so the tighter tick costs nothing.
   setInterval(() => {
     if (state.lastGameTable) renderInactivityWarning(state.lastGameTable);
-  }, 5000);
+  }, 1000);
 
   // ---- About modal (NEW 4.1 §10.7) ----
 
@@ -1355,16 +1415,35 @@
   });
   el.btnToClose.addEventListener('click', () => el.tableOwnerDialog.close());
 
+  /**
+   * FIXED 11.1 (v11.1 spec Fix 1). The "please stand by" banner
+   * (`tableOwnerDistributionInProgress`, driven by `_pendingAllocationBatch`
+   * being open) was only ever cleared by the explicit "Discard Batch"
+   * button or a commit -- closing the dialog by any OTHER means (Escape,
+   * or this dialog's own Close button) left a batch open indefinitely,
+   * and the banner with it. The native `close` event fires for every one
+   * of those paths uniformly (there's no backdrop-click-to-close
+   * anywhere in this app to also worry about), so a single listener here
+   * covers all of them: a batch should never outlive the dialog that
+   * owns it. Harmless/no-op if nothing was ever staged (the server-side
+   * discard handler already tolerates an empty batch).
+   */
+  el.tableOwnerDialog.addEventListener('close', () => {
+    if (state.lastGameTable?.tableOwnerDistributionInProgress) {
+      send('discardPotDistributionBatch');
+    }
+  });
+
   // Terminate/Restore are destructive, owner-only, one-shot actions --
-  // a native confirm() gut-check rather than a second custom dialog
+  // an app-styled confirm() gut-check rather than a second custom dialog
   // layer, matching the emergency-tool nature of both (§1/§2's own
   // "genuine emergencies only" framing).
-  el.btnToTerminate.addEventListener('click', () => {
-    if (!window.confirm('Force-end the current hand? The pot is left untouched.')) return;
+  el.btnToTerminate.addEventListener('click', async () => {
+    if (!(await appConfirm('Force-end the current hand? The pot is left untouched.'))) return;
     send('terminateGameCleanly');
   });
-  el.btnToRestore.addEventListener('click', () => {
-    if (!window.confirm('Restore every stack to the start of the current hand and clear the pot?')) return;
+  el.btnToRestore.addEventListener('click', async () => {
+    if (!(await appConfirm('Restore every stack to the start of the current hand and clear the pot?'))) return;
     send('restorePlayerStacks');
   });
 
@@ -1382,8 +1461,8 @@
   el.btnToDiscardBatch.addEventListener('click', () => {
     send('discardPotDistributionBatch');
   });
-  el.btnToCommitBatch.addEventListener('click', () => {
-    if (!window.confirm('Apply this entire batch now? This cannot be undone.')) return;
+  el.btnToCommitBatch.addEventListener('click', async () => {
+    if (!(await appConfirm('Apply this entire batch now? This cannot be undone.'))) return;
     send('commitPotDistribution');
   });
 
@@ -1421,9 +1500,51 @@
     }
   }
 
+  // ---- Table Owner Testing (NEW 11.1, the-cut-spec_v11-1.md) ----
+
+  el.btnOpenTestingDialog.addEventListener('click', () => {
+    if (state.lastGameTable) renderTestingDialog(state.lastGameTable);
+    el.testingDialog.showModal();
+  });
+  el.btnTestingClose.addEventListener('click', () => el.testingDialog.close());
+
+  el.btnTestingForceDisconnect.addEventListener('click', () => {
+    const targetPlayerId = el.testingForceDisconnectSelect.value;
+    if (!targetPlayerId) return;
+    send('forceDisconnectPlayer', { targetPlayerId });
+  });
+
+  el.btnTestingForceInactivity.addEventListener('click', () => {
+    send('forceInactivityWarning');
+  });
+
+  /**
+   * NEW 11.1: populates the Force Disconnect dropdown with every
+   * currently-connected seated player (the Table Owner's own seat
+   * included, per the spec's literal "any currently-connected, seated
+   * player" -- not excluded, since testing one's own reconnect flow is
+   * itself a legitimate use). Rebuilt each render, same simple-rebuild
+   * justification as toAllocPlayer's/toRemovePlayerSelect's own comments.
+   */
+  function renderTestingDialog(gameTable) {
+    const previousSelection = el.testingForceDisconnectSelect.value;
+    el.testingForceDisconnectSelect.innerHTML = '';
+    for (const player of gameTable.players) {
+      if (player.connected === false) continue;
+      const option = document.createElement('option');
+      option.value = player.id;
+      option.textContent = player.name;
+      el.testingForceDisconnectSelect.appendChild(option);
+    }
+    if ([...el.testingForceDisconnectSelect.options].some((o) => o.value === previousSelection)) {
+      el.testingForceDisconnectSelect.value = previousSelection;
+    }
+    el.btnTestingForceDisconnect.disabled = el.testingForceDisconnectSelect.options.length === 0;
+  }
+
   // ---- Remove Player / End Game (NEW 11.0, the-cut-spec_v11-0.md Part F.2/F.6) ----
 
-  el.btnToRemovePlayer.addEventListener('click', () => {
+  el.btnToRemovePlayer.addEventListener('click', async () => {
     const targetPlayerId = el.toRemovePlayerSelect.value;
     if (!targetPlayerId) return;
     const gameTable = state.lastGameTable;
@@ -1432,18 +1553,22 @@
     if (target.pending) {
       // Mirrors Leave Table's own choice, decided by the Table Owner on
       // the target Player's behalf since they aren't the one clicking.
-      const foldNow = window.confirm(
-        `${target.name} has a pending stake in the current hand. Click OK to fold them and remove them now (forfeiting their stake), or Cancel to remove them once the current cycle closes instead (their hand stays live until then).`
+      // Genuine two-option choice, not a plain destructive yes/no --
+      // appConfirm()'s customizable labels replace what Cancel/OK used
+      // to mean implicitly under window.confirm().
+      const foldNow = await appConfirm(
+        `${target.name} has a pending stake in the current hand. Fold them and remove them now (forfeiting their stake), or remove them once the current cycle closes instead (their hand stays live until then)?`,
+        { confirmLabel: 'Fold and Remove Now', cancelLabel: 'Remove After This Cycle' }
       );
       send('removePlayerFromTable', { targetPlayerId, mode: foldNow ? 'foldAndLeave' : 'leaveAtCycleClose' });
       return;
     }
-    if (!window.confirm(`Remove ${target.name} from the table?`)) return;
+    if (!(await appConfirm(`Remove ${target.name} from the table?`))) return;
     send('removePlayerFromTable', { targetPlayerId, mode: 'foldAndLeave' });
   });
 
-  el.btnToEndGame.addEventListener('click', () => {
-    if (!window.confirm('End this table for everyone? Every player will be disconnected and the table will cease to exist. This cannot be undone.')) return;
+  el.btnToEndGame.addEventListener('click', async () => {
+    if (!(await appConfirm('End this table for everyone? Every player will be disconnected and the table will cease to exist. This cannot be undone.'))) return;
     send('endGame');
   });
 
@@ -2787,6 +2912,10 @@
     // Table Owner happens to have it open while a broadcast arrives
     // (e.g. watching the reconnect-code list while someone's mid-disconnect).
     if (isOwner && el.settingsDialog.open) renderSettingsDialog(gameTable);
+    // NEW 11.1: keep the Testing dialog's Force Disconnect list live too
+    // (e.g. if a listed player disconnects on their own while the Table
+    // Owner has this dialog open).
+    if (isOwner && el.testingDialog.open) renderTestingDialog(gameTable);
     // FIXED 10.4 (the-cut-spec_v10-4.md, 10.4 Completion Gap 1): the
     // button itself is gated directly, not just its wrapping
     // `tableOwnerRailGroup` -- explicitly requested rather than relying

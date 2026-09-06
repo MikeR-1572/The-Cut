@@ -1,7 +1,98 @@
-# The Cut — Card Dealing & Betting Engine (v11.0)
+# The Cut — Card Dealing & Betting Engine (v11.1)
 
-**Disconnection, Reconnection, Leave Table/Remove Player, and table
-lifecycle** — built from `the-cut-spec_v11-0.md` (Parts A through I),
+**Table Owner Testing Tools, plus four fixes carried forward from 10.4
+testing** — built from `the-cut-spec_v11-1.md`. `npm test` — **435
+tests** (up from 429 in v11.0 — 6 new, all in
+`test/gameTable-11-1.test.js`). Live end-to-end WebSocket verification
+run and passed (`live_test_11_1.js`, confirming both Testing
+capabilities route through the exact real production code paths, not
+a simulated shortcut), plus a re-run of `live_test_11_0.js`.
+
+## New: Testing dialog (Table Owner Player Rail, below the divider)
+
+Deliberately scoped as a general debug/QA surface, not named after
+either capability inside it — same reasoning as Settings — since more
+capabilities are expected to follow.
+
+- **Force Disconnect**: the Table Owner picks any currently-connected
+  seated player (Dealer or themselves included) and terminates their
+  *actual* socket. This is not a simulated state change —
+  `targetSocket.terminate()` fires that socket's own real `close`
+  event, which routes through the exact same `handleConnectionLost()`
+  a genuine heartbeat failure or clean close already uses. Everything
+  downstream (grace period, freeze, check/fold-on-expiry, Sitting Out,
+  Dealer reassignment) proceeds at its normal, real timing — this only
+  solves *triggering* the disconnect on demand.
+- **Force Timeout to T-5**: backdates `lastActivityAt` so
+  `tableCloseAt` lands exactly 5 minutes out — the same real field
+  every other consumer (the client's own banner/popup, the server's
+  lifecycle sweep) already reads, not a separate simulated banner
+  state. From that point, T-1 and T-0 follow in real time exactly as
+  production, and real activity still resets the clock normally.
+
+Both are Table-Owner-only, unit-tested (`canForceDisconnect()`,
+`forceInactivityWarning()`), and confirmed live against real sockets.
+Decided to survive through the 13.0 beta, not gated off before then —
+beta testers will hit the same practical testing limitation Mike did.
+
+## Fix 1 — "Please stand by" banner no longer outlives the dialog
+
+The Pot Distribution banner (`tableOwnerDistributionInProgress`) was
+only ever cleared by the explicit "Discard Batch" button or a commit.
+Closing the Table Owner Tools dialog any other way (Escape, its own
+Close button) left `_pendingAllocationBatch` open indefinitely. Fixed
+with a single `close` event listener on the dialog itself — the native
+event fires uniformly for every close path in this app (there's no
+backdrop-click-to-close anywhere to also account for) — that discards
+any still-open batch automatically. A batch can no longer outlive the
+dialog that owns it.
+
+## Fix 2 — no native `confirm()` left anywhere
+
+Replaced with one reusable, app-styled, promise-based `appConfirm()`
+dialog, used at every site the native browser confirm used to appear:
+Terminate Cleanly, Restore Stacks, Commit Batch, Misdeal, both Remove
+Player confirmations (the plain case and the fold-now/wait-for-cycle
+choice, now with real button labels instead of implicit OK/Cancel
+semantics), End Game, and both player-facing Leave Table
+confirmations. (Direct count came to 8 native `confirm()` call sites,
+not the 9 the review document estimated — every one found was
+converted regardless of the exact number.)
+
+## Fix 3 — inactivity timing precision
+
+- **Issue A**: the client's shared banner/popup tick was 5000ms — fine
+  for the T-5 banner's "about N minutes" wording, too coarse for the
+  T-1 popup's live per-second countdown. Dropped to 1000ms; it's a
+  pure re-render from already-known state, no new network cost.
+- **Issue B**: the server's `runLifecycleSweep()` ran once every 60
+  seconds — correct for H.1's 30-60-minute timescale, but H.2's entire
+  T-5→T-1→T-0 sequence plays out over 5 minutes, so the real close
+  could lag up to a full minute behind `tableCloseAt`. Same category of
+  bug as `_activePlayers()` being shared across callers with
+  incompatible needs. Fixed by tightening the single shared interval to
+  5 seconds rather than splitting into two sweeps — this app runs at
+  most a handful of concurrent tables, so comparing timestamps five
+  times a second is negligible cost; the "don't poll every table every
+  second forever" concern the spec raised doesn't bite at this app's
+  actual scale. H.2's worst-case lag drops from up to 60s to up to 5s;
+  H.1 is unaffected by the tighter interval.
+
+## Fix 4 — landing page: two columns, not three
+
+"Open a Table" stays alone in the first column; "Join a Table" and
+"Re-join a Table" are now stacked as a pair in the second column,
+separated by a horizontal "or" divider. Halves the layout's horizontal
+footprint at the video-call-plus-browser width range that prompted
+this, without touching the already-correct sub-720px single-column
+stack (Open → Join → Re-join), which this restructuring doesn't
+change at all.
+
+---
+
+## v11.0 — Disconnection, Reconnection, Leave Table/Remove Player, and table lifecycle
+
+Built from `the-cut-spec_v11-0.md` (Parts A through I),
 `reconnection-reconciliation-11-0.md`, and `10-0-reconnection-reference.md`.
 `npm test` — **429 tests** (up from 393 in v10.4 — 36 new, all in
 `test/gameTable-11-0.test.js`; no existing test removed or weakened).

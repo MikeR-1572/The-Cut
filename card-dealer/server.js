@@ -362,6 +362,10 @@ wss.on('connection', (ws, req) => {
         return handleEndGame(ws);
       case 'restartActivityClock':
         return handleRestartActivityClock(ws);
+      case 'forceDisconnectPlayer':
+        return handleForceDisconnectPlayer(ws, payload);
+      case 'forceInactivityWarning':
+        return handleForceInactivityWarning(ws);
       default:
         return; // unknown message type: ignore
     }
@@ -1008,10 +1012,55 @@ function handleRestartActivityClock(ws) {
   broadcastGameTableState(gameTable);
 }
 
+/**
+ * NEW 11.1 (Testing dialog, Capability 1): terminates the target
+ * Player's actual socket -- NOT a simulated state change. Calling
+ * .terminate() fires that socket's own already-registered 'close'
+ * handler, which routes through handleConnectionLost() exactly as a
+ * genuine heartbeat failure or clean close would -- no separate/
+ * duplicate disconnect-handling logic here.
+ */
+function handleForceDisconnectPlayer(ws, { targetPlayerId }) {
+  const gameTable = gameTableForSocket(ws);
+  if (!gameTable) return;
+  const check = gameTable.canForceDisconnect(ws.meta.playerId, targetPlayerId);
+  if (!check.ok) return send(ws, 'dealError', { message: check.error });
+  const targetSocket = playerSockets.get(targetPlayerId);
+  if (!targetSocket) return send(ws, 'dealError', { message: 'That player has no active connection to terminate.' });
+  targetSocket.terminate();
+}
+
+/** NEW 11.1 (Testing dialog, Capability 2). */
+function handleForceInactivityWarning(ws) {
+  const gameTable = gameTableForSocket(ws);
+  if (!gameTable) return;
+  const result = gameTable.forceInactivityWarning(ws.meta.playerId);
+  if (!result.ok) return send(ws, 'dealError', { message: result.error });
+  broadcastGameTableState(gameTable);
+}
+
 // NEW 11.0 (Part H.1/H.2): table lifecycle. Checked on a shared sweep
 // rather than a timer per table -- simpler, and imprecision on the order
 // of this interval is completely fine at a 30-60 MINUTE timescale.
-const LIFECYCLE_SWEEP_INTERVAL_MS = 60 * 1000;
+//
+// FIXED 11.1 (Fix 3, Issue B): the original 60-second value here was
+// reasoned correctly for H.1's timescale, but H.2's entire T-5->T-1->T-0
+// sequence plays out over 5 minutes total -- a 60-second sweep could
+// leave the real close lagging up to a full minute behind tableCloseAt.
+// Confirmed the same category of bug as `_activePlayers()` being shared
+// across callers with incompatible needs: one interval correct for one
+// consumer, reused somewhere its timing assumptions didn't hold.
+//
+// Fix chosen: tighten the single shared interval to 5 seconds, rather
+// than splitting into two separate sweeps. This app runs at most a
+// handful of concurrent tables (a home-game tool, not a many-thousands-
+// of-tables service) -- comparing two timestamps per table five times a
+// second is negligible cost, so the "avoid polling every table every
+// second forever" concern the spec raised doesn't actually bite at this
+// app's real scale. Worst-case H.2 lag drops from up to 60s to up to
+// 5s; H.1 (already tolerant of 30-60 minute imprecision) is completely
+// unaffected by the tighter interval.
+const LIFECYCLE_SWEEP_INTERVAL_MS = 5 * 1000;
 // Part H.1: "30-60 minutes... not fully locked" -- 45 is the midpoint,
 // same "we won't know until we experience it" posture as every other
 // timer in this spec.

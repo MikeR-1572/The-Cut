@@ -826,6 +826,54 @@ class GameTable {
     return { ok: true };
   }
 
+  // ------------------------------------------------------------------
+  // NEW 11.1 (the-cut-spec_v11-1.md): Table Owner Testing Tools. A
+  // debug/QA entry point that triggers the exact same production code
+  // paths a real event would, on demand -- not a parallel simulated
+  // system. Both capabilities are pure authorization/state-computation
+  // gates; the actual socket termination for Capability 1 is server.js's
+  // job (this class has no notion of sockets).
+  // ------------------------------------------------------------------
+
+  /**
+   * Capability 1 (Force Disconnect): authorization + target-validity
+   * check only -- the actual `targetSocket.terminate()` call lives in
+   * server.js, which then routes through the exact same
+   * handleConnectionLost() a genuine heartbeat failure or clean close
+   * already uses (terminate() fires that socket's own 'close' event
+   * naturally; nothing here duplicates that logic). Kept as its own
+   * method so the authorization lives in exactly one place, consistent
+   * with every other Table-Owner-only function, and so it's testable
+   * without a real WebSocket.
+   */
+  canForceDisconnect(requesterId, targetPlayerId) {
+    if (requesterId !== this.creatorId) {
+      return { ok: false, error: 'Only the Table Owner can force a disconnect.' };
+    }
+    const target = this.getPlayer(targetPlayerId);
+    if (!target) return { ok: false, error: 'Player not found.' };
+    if (!target.connected) return { ok: false, error: 'That player is not currently connected.' };
+    return { ok: true };
+  }
+
+  /**
+   * Capability 2 (Force Timeout to T-5): jumps the REAL inactivity
+   * clock straight to the T-5 mark by backdating `lastActivityAt` --
+   * not a separate simulated banner state. This is the exact same
+   * `tableCloseAt` every other consumer (the client's own banner/popup,
+   * the server's lifecycle sweep) already reads, so everything from
+   * this point on behaves exactly as production: real activity still
+   * resets it, the sweep still enforces the real T-0 close.
+   */
+  forceInactivityWarning(requesterId) {
+    if (requesterId !== this.creatorId) {
+      return { ok: false, error: 'Only the Table Owner can do this.' };
+    }
+    const FIVE_MINUTES_MS = 5 * 60 * 1000;
+    this.lastActivityAt = Date.now() + FIVE_MINUTES_MS - this.inactivityTimeoutSeconds * 1000;
+    return { ok: true };
+  }
+
   /**
    * NEW 5.0 (§5.8): "all active players" throughout the phase machine
    * means not folded, not sitting out -- the same definition already

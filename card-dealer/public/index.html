@@ -42,39 +42,49 @@
         <button class="btn btn-primary" id="btn-create-game-table" title="Create a new table and become its Dealer">Open Table</button>
       </div>
 
-      <div class="lobby-divider" aria-hidden="true"><span>or</span></div>
+      <div class="lobby-divider lobby-divider--vertical" aria-hidden="true"><span>or</span></div>
 
-      <div class="lobby-card">
-        <h2>Join a table</h2>
-        <p class="hint">Ask whoever opened the table for their code.</p>
-        <label class="field">
-          <span>Table code</span>
-          <input type="text" id="join-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
-        </label>
-        <label class="field">
-          <span>Your name</span>
-          <input type="text" id="join-name" maxlength="24" placeholder="e.g. Sasha" autocomplete="off" />
-        </label>
-        <button class="btn btn-secondary" id="btn-join-game-table" title="Join this table with the code above">Take a Seat</button>
-      </div>
+      <!-- CHANGED 11.1 (Fix 4): Join and Re-join are now stacked as a
+           pair in this second column (a horizontal "or" divider between
+           them) rather than a third side-by-side card -- halves the
+           layout's horizontal footprint at the width range that matters
+           for a video-call-plus-browser side-by-side setup, without
+           touching the already-correct sub-720px single-column stack
+           (Open -> Join -> Re-join), which this restructuring doesn't
+           change at all. -->
+      <div class="lobby-column">
+        <div class="lobby-card">
+          <h2>Join a table</h2>
+          <p class="hint">Ask whoever opened the table for their code.</p>
+          <label class="field">
+            <span>Table code</span>
+            <input type="text" id="join-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+          </label>
+          <label class="field">
+            <span>Your name</span>
+            <input type="text" id="join-name" maxlength="24" placeholder="e.g. Sasha" autocomplete="off" />
+          </label>
+          <button class="btn btn-secondary" id="btn-join-game-table" title="Join this table with the code above">Take a Seat</button>
+        </div>
 
-      <div class="lobby-divider" aria-hidden="true"><span>or</span></div>
+        <div class="lobby-divider lobby-divider--horizontal" aria-hidden="true"><span>or</span></div>
 
-      <!-- NEW 11.0 (Part D): the primary, discoverable reconnect path --
-           a dedicated code entry, separate from Join a Table's name/code
-           pair, since a returning Player doesn't re-enter their name. -->
-      <div class="lobby-card">
-        <h2>Re-join a table</h2>
-        <p class="hint">Got disconnected? Enter your reconnect code to pick up right where you left off.</p>
-        <label class="field">
-          <span>Reconnect code</span>
-          <input type="text" id="rejoin-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
-        </label>
-        <label class="field">
-          <span>Table code</span>
-          <input type="text" id="rejoin-table-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
-        </label>
-        <button class="btn btn-secondary" id="btn-rejoin-game-table" title="Reconnect using your code">Re-Join</button>
+        <!-- NEW 11.0 (Part D): the primary, discoverable reconnect path --
+             a dedicated code entry, separate from Join a Table's name/code
+             pair, since a returning Player doesn't re-enter their name. -->
+        <div class="lobby-card">
+          <h2>Re-join a table</h2>
+          <p class="hint">Got disconnected? Enter your reconnect code to pick up right where you left off.</p>
+          <label class="field">
+            <span>Reconnect code</span>
+            <input type="text" id="rejoin-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+          </label>
+          <label class="field">
+            <span>Table code</span>
+            <input type="text" id="rejoin-table-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+          </label>
+          <button class="btn btn-secondary" id="btn-rejoin-game-table" title="Reconnect using your code">Re-Join</button>
+        </div>
       </div>
     </section>
 
@@ -175,6 +185,11 @@
           <div class="rail-group rail-row rail-row--secondary" id="table-owner-rail-group" hidden>
             <button class="btn btn-secondary btn-small" id="btn-open-settings-dialog" type="button" title="Reconnect timeout, reconnect codes">Settings</button>
             <button class="btn btn-secondary btn-small" id="btn-open-table-owner-dialog" type="button" title="Emergency table recovery tools">Table Owner Tools</button>
+            <!-- NEW 11.1 (the-cut-spec_v11-1.md): general TO debug/QA
+                 surface -- deliberately not named after either
+                 capability inside it, same reasoning as Settings, since
+                 more capabilities are expected to follow. -->
+            <button class="btn btn-secondary btn-small" id="btn-open-testing-dialog" type="button" title="On-demand disconnect/inactivity testing tools">Testing</button>
           </div>
         </div>
       </aside>
@@ -632,6 +647,46 @@
 
       <div class="dialog-actions">
         <button type="button" class="btn btn-secondary" id="btn-settings-close" title="Close">Close</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Table Owner Testing (NEW 11.1, the-cut-spec_v11-1.md):
+         on-demand triggers for the exact same production code paths a
+         real event would take -- not a parallel simulated system.
+         Deliberately built expecting more capabilities to be added
+         later (each gets its own <section>), per Mike's own framing.
+         See renderTestingDialog() in client.js. ---- -->
+    <dialog id="testing-dialog" class="chip-dialog table-owner-dialog">
+      <h3>Table Owner Testing</h3>
+
+      <section class="to-section">
+        <h4>Force Disconnect</h4>
+        <p class="to-section-hint">Terminates a player's real connection, exactly as a genuine drop would -- the grace period and everything downstream proceeds at normal timing.</p>
+        <div class="to-alloc-form">
+          <select id="testing-force-disconnect-select" class="mono-input"></select>
+          <button type="button" class="btn btn-secondary btn-small" id="btn-testing-force-disconnect" title="Force this player's connection to drop right now">Disconnect</button>
+        </div>
+      </section>
+
+      <section class="to-section">
+        <h4>Force Timeout to T-5</h4>
+        <p class="to-section-hint">Jumps the table's real inactivity clock straight to the 5-minute warning. From there it behaves exactly as production -- T-1 and T-0 follow in real time unless something resets it.</p>
+        <button type="button" class="btn btn-secondary btn-small" id="btn-testing-force-inactivity" title="Jump the inactivity clock to T-5 now">Force T-5</button>
+      </section>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-testing-close" title="Close">Close</button>
+      </div>
+    </dialog>
+
+    <!-- ---- Reusable app-styled confirmation dialog (NEW 11.1, Fix 2):
+         replaces every window.confirm() call in the app -- native
+         browser confirm() left nowhere. See appConfirm() in client.js. ---- -->
+    <dialog id="app-confirm-dialog" class="chip-dialog">
+      <p class="dialog-hint" id="app-confirm-message"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-app-confirm-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-app-confirm-ok">Confirm</button>
       </div>
     </dialog>
 

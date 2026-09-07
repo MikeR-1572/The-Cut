@@ -1,7 +1,97 @@
-# The Cut — Card Dealing & Betting Engine (v11.1)
+# The Cut — Card Dealing & Betting Engine (v11.2)
 
-**Table Owner Testing Tools, plus four fixes carried forward from 10.4
-testing** — built from `the-cut-spec_v11-1.md`. `npm test` — **435
+**Table Owner Function Fixes, Host rename, and two smaller
+corrections** — built from `the-cut-spec_v11-2.md`, consolidating
+everything found during 11.1 play-testing. `npm test` — **442 tests**
+(up from 435 in v11.1 — 7 new, all in `test/gameTable-11-2.test.js`).
+Live end-to-end verification run and passed (`live_test_11_2.js`,
+plus a re-run of `live_test_11_0.js`/`live_test_11_1.js` to confirm
+nothing in the wider rename/fix set regressed anything earlier).
+
+## Fix 1 — Restore Stacks now accounts for multi-hand cycles
+
+`_preGameSnapshot` was being recaptured on *every* hand, including a
+re-ante "New Hand" within an ongoing ReAnteable cycle, not only a
+genuine new cycle — the 10.3-era comment describing that behavior was
+correct when written, and silently stopped being true the moment a
+cycle could span more than one hand. Restoring to a mid-cycle hand's
+own snapshot and then zeroing the pot discarded whatever the prior
+hand(s) in that cycle had already carried forward. Fixed: the snapshot
+is now only recaptured on a genuine new cycle (`clearFolded === true`,
+entry from PreGame/CycleComplete) — the only point where the total
+money in play is unambiguous. Confirmation/announcement wording
+corrected from "the start of the last hand" to "the start of the
+current cycle" to match.
+
+## Fix 2 — a terminated hand can no longer leave a postable stale ante
+
+`_performFullReset()` reset every other per-hand transient field but
+never `oweAnte`; `postAnteBlind()` had no phase check of its own, so a
+stale nonzero `oweAnte` surviving Terminate Cleanly or Restore Stacks
+was sufficient on its own to let real money move into the pot while
+the table sat idle. Fixed with both the required change (`oweAnte`
+now reset alongside everything else) and the recommended
+defense-in-depth one (`postAnteBlind()` now also gated on
+`handPhase === 'RequestAntes'`) — scoped to phase-gated profiles only,
+after an existing test caught that the legacy no-Game-Choice "flexible
+toolbox" mode never transitions `handPhase` away from its constructor
+default at all, and would have been broken by an unconditional gate.
+
+## Fix 3 — Stud side-pot bug: an uncallable bet no longer creates a pot
+
+**Live-reproduced directly against `GameTable` before fixing**, per
+this project's own standing discipline, not shipped on a code-read
+alone: three players already all-in and capped at $100 total from an
+earlier street, the fourth (also at $100 cumulative) betting a further
+$10 was incorrectly allowed by `_validateBetOrRaise()`'s proactive
+opponent-ceiling cap. Root cause: the check compared a street-local
+raw bet amount against a whole-hand-cumulative ceiling — unit-mismatched
+scales that happen to coincide on a player's first street and silently
+diverge on any later one. Fixed by comparing the player's own proposed
+*cumulative total for the hand* against the ceiling instead. Also
+added the recommended defense-in-depth measure:
+`_checkUncalledBetRefund()` now also runs after an ordinary Bet/Raise,
+not only fold/all-in, so this category of bug can't slip through both
+layers at once again. Two regression tests added, including one
+confirming the fix isn't overly strict on a genuinely callable bet.
+
+## Fix 4 — "Table Owner" renamed to "Host" everywhere player-facing
+
+"Table Owner" stays exactly as-is in code, comments, `creatorId`, and
+every spec/VERSIONING document. Every player-facing occurrence is now
+"Host": all fourteen "Only the [Table Owner→Host] can..." messages,
+three dialog headings (Host Tools/Host Settings/Host Testing), the
+Player Rail's section label, the pot-distribution-in-progress banner,
+and the Terminate Cleanly/Restore Stacks/End Game announcements. The
+Pot Distribution announcement was also rewritten from a bare "has
+distributed the pot" into a full per-player breakdown — one entry per
+player in the committed batch, ordered by seat position, `+$X`/`−$X`
+per player (including a plain `$0` entry for a net-zero player,
+never omitted).
+
+## Fix 5 — disconnected-player badge: consistent danger styling
+
+Was the app's warm gold/amber tint, the same visual register as a
+routine status. Now reuses the existing danger palette
+(`var(--danger-bg)`/`var(--danger-text)`, the same pairing already
+used for `.lobby-error`/`.table-error`) rather than introducing a
+third color for "something's wrong." Styling only — no change to the
+countdown text or logic.
+
+## Fix 6 — Buy Chips prompt no longer fires on reconnect
+
+The prompt was gated on `isFirstGameTableState` alone, true for a
+reconnecting client's own empty local state just as much as a genuinely
+new one — the client itself has no way to tell the two cases apart.
+Fixed by adding an explicit `isReconnect` field to the `'joined'`
+message (the server already knows internally which handler produced
+it); the Buy Chips prompt now also requires `isReconnect === false`.
+
+---
+
+## v11.1 — Table Owner Testing Tools, plus four fixes carried forward from 10.4
+
+Built from `the-cut-spec_v11-1.md`. `npm test` — **435
 tests** (up from 429 in v11.0 — 6 new, all in
 `test/gameTable-11-1.test.js`). Live end-to-end WebSocket verification
 run and passed (`live_test_11_1.js`, confirming both Testing

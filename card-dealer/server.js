@@ -434,7 +434,7 @@ function handleCreateGameTable(ws, { playerName, tableName, suggestedBuyIn }) {
     if (Number.isFinite(amount)) gameTable.setSuggestedBuyIn(playerId, Math.round(amount));
   }
 
-  send(ws, 'joined', { playerId, gameTableCode: code, reconnectCode: gameTable.getPlayer(playerId).reconnectCode });
+  send(ws, 'joined', { playerId, gameTableCode: code, reconnectCode: gameTable.getPlayer(playerId).reconnectCode, isReconnect: false });
   broadcastGameTableState(gameTable);
   broadcastAnnouncements(gameTable); // FIXED (found while re-verifying the live smoke test after the review pass): Part G's "player joined" announcement was queued but never actually drained/sent here
 }
@@ -467,7 +467,7 @@ function handleJoinGameTable(ws, { gameTableCode, playerName }) {
   playerSockets.set(playerId, ws);
   ws.meta = { playerId, gameTableCode: code };
 
-  send(ws, 'joined', { playerId, gameTableCode: code, reconnectCode: gameTable.getPlayer(playerId).reconnectCode });
+  send(ws, 'joined', { playerId, gameTableCode: code, reconnectCode: gameTable.getPlayer(playerId).reconnectCode, isReconnect: false });
   broadcastGameTableState(gameTable);
   broadcastAnnouncements(gameTable); // FIXED -- same gap as handleCreateGameTable above
 }
@@ -915,7 +915,7 @@ function handleReconnectToGameTable(ws, { gameTableCode, code }, req) {
   playerSockets.set(playerId, ws);
   ws.meta = { playerId, gameTableCode: tableCode };
 
-  send(ws, 'joined', { playerId, gameTableCode: tableCode, reconnectCode: gameTable.getPlayer(playerId).reconnectCode });
+  send(ws, 'joined', { playerId, gameTableCode: tableCode, reconnectCode: gameTable.getPlayer(playerId).reconnectCode, isReconnect: true });
   broadcastGameTableState(gameTable);
   broadcastAnnouncements(gameTable);
 }
@@ -1000,7 +1000,7 @@ function handleEndGame(ws) {
   if (!gameTable) return;
   const result = gameTable.endGame(ws.meta.playerId);
   if (!result.ok) return send(ws, 'dealError', { message: result.error });
-  teardownTable(ws.meta.gameTableCode, 'The Table Owner has ended this table.');
+  teardownTable(ws.meta.gameTableCode, 'The Host has ended this table.');
 }
 
 /** NEW 11.0 (Part H.2). */

@@ -34,7 +34,8 @@
     appInfo: null, // fetched once from /app-info.json (v4.1, About button)
     pendingAutoOpenOptions: false, // v4.1: Select auto-opens Options once the new gameChoiceId lands
     wasShowingTurnActions: false, // NEW 5.1 (bug fix) -- edge-triggered Bet/Raise box clearing; see renderBettingRail
-    myReconnectCode: null, // NEW 11.0 (Part D) -- this Player's own code, shown so they don't have to ask the Table Owner
+    myReconnectCode: null, // NEW 11.0 (Part D) -- this Player's own code, shown so they don't have to ask the Host for it
+    isReconnect: false, // NEW 11.2 (Fix 6) -- set from the 'joined' message's own field
   };
 
   // ---- DOM refs ----
@@ -339,6 +340,12 @@
         state.playerId = msg.playerId;
         state.gameTableCode = msg.gameTableCode;
         state.myReconnectCode = msg.reconnectCode; // NEW 11.0 (Part D)
+        // FIXED 11.2 (Fix 6): the server now says explicitly whether this
+        // was a reconnect or a genuine create/join -- the client itself
+        // can never tell the difference on its own (its local state is
+        // equally empty either way), which is exactly why the Buy Chips
+        // prompt below was incorrectly firing on every reconnect too.
+        state.isReconnect = msg.isReconnect === true;
         showTableView();
         break;
       case 'gameTableState': {
@@ -347,7 +354,11 @@
         state.lastGameTable = msg.gameTable;
         state.pendingGuardedButton = null; // NEW 9.2 (§6.6) -- a successful action resolved whatever was pending
         renderGameTable(msg.gameTable);
-        if (isFirstGameTableState) maybeShowSuggestedBuyInPrompt(msg.gameTable);
+        // CHANGED 11.2 (Fix 6): was gated on isFirstGameTableState alone,
+        // which is equally true for a reconnecting client (its own local
+        // state starts just as empty) -- now also requires that this
+        // wasn't a reconnect, per the 'joined' message's own new field.
+        if (isFirstGameTableState && !state.isReconnect) maybeShowSuggestedBuyInPrompt(msg.gameTable);
         break;
       }
       case 'joinError':
@@ -2336,7 +2347,7 @@
     // elsewhere (the Table Owner Tools dialog itself), not this generic
     // notice.
     if (gameTable.tableOwnerDistributionInProgress && !isOwner) {
-      el.tableNotice.textContent = 'Table Owner functions have been invoked, please stand by.';
+      el.tableNotice.textContent = 'Host functions have been invoked, please stand by.';
       el.tableNotice.hidden = false;
       return;
     }

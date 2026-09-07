@@ -756,13 +756,16 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   border-radius: 4px;
   flex-shrink: 0;
 }
-/* NEW 11.0 (Part A/B): a distinct amber/warning tint from the neutral
-   Sitting Out badge above -- this is a live, ticking, "waiting to see if
-   they come back" state, not yet the settled Sitting Out outcome. */
+/* CHANGED 11.2 (Fix 5): was the app's warm gold/amber tint -- the same
+   visual register as a routine, non-urgent status. A disconnected
+   player is effectively fatal to the table's progress until they
+   return, so this now reuses the app's existing danger palette
+   (the same pairing already used for .lobby-error/.table-error)
+   rather than introducing a third color for "something's wrong." */
 .seat-disconnected-badge {
-  color: #e8c98a;
-  background: rgba(201, 163, 92, 0.16);
-  border: 1px solid rgba(201, 163, 92, 0.45);
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-text);
 }
 /* NEW 9.0 (§3, §6.11): persistent, distinct from Folded/Sitting Out --
    warm gold to match .btn-allin, signaling "still live, out of chips." */

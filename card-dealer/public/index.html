@@ -178,13 +178,13 @@
                lockstep with #table-owner-rail-group itself in
                renderTableOwnerControls() (client.js). -->
           <div class="rail-divider" id="table-owner-section-divider" hidden></div>
-          <p class="rail-section-label" id="table-owner-section-label" hidden>Table Owner</p>
+          <p class="rail-section-label" id="table-owner-section-label" hidden>Host</p>
           <!-- NEW 10.4 (the-cut-spec_v10-4.md Part A §5): Table-Owner-only,
                visible only when creatorId === the viewer's own id -- see
                renderTableOwnerControls() in client.js. -->
           <div class="rail-group rail-row rail-row--secondary" id="table-owner-rail-group" hidden>
             <button class="btn btn-secondary btn-small" id="btn-open-settings-dialog" type="button" title="Reconnect timeout, reconnect codes">Settings</button>
-            <button class="btn btn-secondary btn-small" id="btn-open-table-owner-dialog" type="button" title="Emergency table recovery tools">Table Owner Tools</button>
+            <button class="btn btn-secondary btn-small" id="btn-open-table-owner-dialog" type="button" title="Emergency table recovery tools">Host Tools</button>
             <!-- NEW 11.1 (the-cut-spec_v11-1.md): general TO debug/QA
                  surface -- deliberately not named after either
                  capability inside it, same reasoning as Settings, since
@@ -558,7 +558,7 @@
          preview, discard/commit). See renderTableOwnerDialog() in
          client.js. ---- -->
     <dialog id="table-owner-dialog" class="chip-dialog table-owner-dialog">
-      <h3>Table Owner Tools</h3>
+      <h3>Host Tools</h3>
       <p class="dialog-hint">Emergency recovery only -- not for normal play.</p>
 
       <section class="to-section">
@@ -627,7 +627,7 @@
          and the active reconnect-code list. See renderSettingsDialog()
          in client.js. ---- -->
     <dialog id="settings-dialog" class="chip-dialog table-owner-dialog">
-      <h3>Table Owner Settings</h3>
+      <h3>Host Settings</h3>
 
       <section class="to-section">
         <h4>Reconnect Timeout</h4>
@@ -657,7 +657,7 @@
          later (each gets its own <section>), per Mike's own framing.
          See renderTestingDialog() in client.js. ---- -->
     <dialog id="testing-dialog" class="chip-dialog table-owner-dialog">
-      <h3>Table Owner Testing</h3>
+      <h3>Host Testing</h3>
 
       <section class="to-section">
         <h4>Force Disconnect</h4>

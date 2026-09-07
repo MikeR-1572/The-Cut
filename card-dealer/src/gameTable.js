@@ -619,7 +619,7 @@ class GameTable {
    */
   setReconnectTimeout(requesterId, seconds) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can change the reconnect timeout.' };
+      return { ok: false, error: 'Only the Host can change the reconnect timeout.' };
     }
     if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) {
       return { ok: false, error: 'Reconnect timeout must be a positive number of seconds.' };
@@ -713,7 +713,7 @@ class GameTable {
    */
   removePlayerFromTable(requesterId, targetPlayerId, mode) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can remove a player.' };
+      return { ok: false, error: 'Only the Host can remove a player.' };
     }
     const player = this.getPlayer(targetPlayerId);
     if (!player) return { ok: false, error: 'Player not found.' };
@@ -805,7 +805,7 @@ class GameTable {
    */
   endGame(requesterId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can end the game.' };
+      return { ok: false, error: 'Only the Host can end the game.' };
     }
     return { ok: true };
   }
@@ -820,7 +820,7 @@ class GameTable {
    */
   restartActivityClock(requesterId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can restart the inactivity clock.' };
+      return { ok: false, error: 'Only the Host can restart the inactivity clock.' };
     }
     this.touchActivity();
     return { ok: true };
@@ -848,7 +848,7 @@ class GameTable {
    */
   canForceDisconnect(requesterId, targetPlayerId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can force a disconnect.' };
+      return { ok: false, error: 'Only the Host can force a disconnect.' };
     }
     const target = this.getPlayer(targetPlayerId);
     if (!target) return { ok: false, error: 'Player not found.' };
@@ -867,7 +867,7 @@ class GameTable {
    */
   forceInactivityWarning(requesterId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can do this.' };
+      return { ok: false, error: 'Only the Host can do this.' };
     }
     const FIVE_MINUTES_MS = 5 * 60 * 1000;
     this.lastActivityAt = Date.now() + FIVE_MINUTES_MS - this.inactivityTimeoutSeconds * 1000;
@@ -1134,15 +1134,23 @@ class GameTable {
    */
   _enterRequestAntes(clearFolded) {
     this._performFullReset({ clearFolded });
-    // NEW 10.3 (Part A §2): captured fresh at the START of every
-    // genuinely new hand, so Function 2 (Restore Player Stacks) always
-    // reflects the most recently started hand, never a stale one. Taken
-    // right here rather than inside _performFullReset() itself -- that
-    // function is also called by reshuffle() (a mid-Cycle abandon, not a
-    // new hand) and Function 1 (Terminate Cleanly, an emergency stop,
-    // not a new hand starting) -- neither of those should overwrite the
-    // snapshot Function 2 restores from.
-    this._preGameSnapshot = snapshotPlayers(this.players);
+    // FIXED 11.2 (Fix 1): the 10.3-era comment below was correct at the
+    // time it was written -- every call here WAS a genuinely new hand
+    // back then. It stopped being true the moment a Cycle could span
+    // more than one hand (ReAnteable games, New Hand mid-Cycle): this
+    // was being recaptured on EVERY hand, including a re-ante hand
+    // within an ongoing Cycle, silently overwriting the true
+    // start-of-Cycle snapshot with a mid-Cycle one that already
+    // reflects the prior hand's ante deducted into a still-open pot.
+    // Restoring to that and then zeroing the pot (restorePlayerStacks())
+    // discarded that money outright rather than conserving it. Only
+    // recapture on a genuine new Cycle (`clearFolded === true`, i.e.
+    // entry from PreGame/CycleComplete) -- the only point where the
+    // total money in play is unambiguous. See restorePlayerStacks()'s
+    // own updated comment for the restore-side half of this fix.
+    if (clearFolded) {
+      this._preGameSnapshot = snapshotPlayers(this.players);
+    }
     const dealer = this.getDealer();
     // CHANGED 11.0 (Part E): use the positional anchor, not necessarily
     // the current Dealer -- if a mid-cycle emergency handoff split is in
@@ -1840,6 +1848,16 @@ class GameTable {
       player.allIn = false; // NEW 9.0 (§6.11)
       player.bettingCapped = false; // NEW 9.1 (§6.10)
       player.totalContributedThisHand = 0; // NEW 9.0 (§6.10)
+      // FIXED 11.2 (Fix 2, required half): every other per-hand
+      // transient field was already reset here -- `oweAnte` was the one
+      // gap. postAnteBlind() has no hand-phase check of its own (see its
+      // own updated comment for the defense-in-depth half of this fix),
+      // so a stale nonzero `oweAnte` surviving a reset was sufficient on
+      // its own to let a player post real money into the pot while the
+      // table sat idle between games, after Terminate Cleanly or Restore
+      // Stacks (both funnel through _forceTerminateCurrentHand() ->
+      // this same shared reset).
+      player.oweAnte = 0;
     }
     this.deck.push(...this.discardPile);
     this.discardPile = [];
@@ -1958,10 +1976,10 @@ class GameTable {
    */
   terminateGameCleanly(requesterId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can terminate the game.' };
+      return { ok: false, error: 'Only the Host can terminate the game.' };
     }
     this._forceTerminateCurrentHand();
-    this._queueAnnouncement('The Table Owner has terminated the current hand. The pot remains untouched.', 'table-owner');
+    this._queueAnnouncement('The Host has terminated the current hand. The pot remains untouched.', 'table-owner');
     return { ok: true };
   }
 
@@ -1970,12 +1988,23 @@ class GameTable {
    * invokable -- does not require Function 1 first (_forceTerminateCurrentHand()
    * is idempotent to call again if a hand happens to still be in
    * progress). Restores every seated Player's chips/totalBuyIn to what
-   * they were at the start of the CURRENT hand (not the whole session),
-   * via the existing snapshot()/restore() pair in src/player.js -- built
-   * in v8.0 for a future undo feature, never called until now. A Player
-   * who joined after the snapshot was taken is correctly left untouched
-   * by restore(), not zeroed -- that's restore()'s own existing,
-   * documented behavior, not new logic written here.
+   * they were at the start of the current CYCLE (not the whole
+   * session), via the existing snapshot()/restore() pair in
+   * src/player.js -- built in v8.0 for a future undo feature, never
+   * called until now. A Player who joined after the snapshot was taken
+   * is correctly left untouched by restore(), not zeroed -- that's
+   * restore()'s own existing, documented behavior, not new logic
+   * written here.
+   *
+   * CORRECTED 11.2 (Fix 1): this doc comment originally said "start of
+   * the CURRENT hand" -- true only for a single-hand Cycle. `_preGameSnapshot`
+   * itself is now only recaptured on a genuine new Cycle (see
+   * _enterRequestAntes()'s own updated comment), so this restores to
+   * the start of the CYCLE regardless of how many re-ante hands
+   * happened first -- the only point where the total money in play is
+   * unambiguous. Restoring to a mid-Cycle hand's own snapshot and then
+   * zeroing the pot would otherwise discard whatever the prior hand(s)
+   * in the same Cycle had already carried forward into it.
    *
    * Rejects outright, per Mike's own direct call, if no hand has ever
    * started this session -- there is nothing to restore TO, since
@@ -1983,7 +2012,7 @@ class GameTable {
    */
   restorePlayerStacks(requesterId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can restore player stacks.' };
+      return { ok: false, error: 'Only the Host can restore player stacks.' };
     }
     if (!this._preGameSnapshot) {
       return { ok: false, error: 'No hand has started yet this session -- stacks are already at their starting values, nothing to restore.' };
@@ -1991,7 +2020,7 @@ class GameTable {
     this._forceTerminateCurrentHand();
     restorePlayers(this.players, this._preGameSnapshot);
     this.pot = 0;
-    this._queueAnnouncement('The Table Owner has restored every player\u2019s stack to the start of the last hand, and cleared the pot.', 'table-owner');
+    this._queueAnnouncement('The Host has restored every player\u2019s stack to the start of the current cycle, and cleared the pot.', 'table-owner');
     return { ok: true };
   }
 
@@ -2013,7 +2042,7 @@ class GameTable {
    */
   beginPotDistribution(requesterId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can distribute the pot.' };
+      return { ok: false, error: 'Only the Host can distribute the pot.' };
     }
     if (!this.idle) {
       return { ok: false, error: 'Pot Distribution can only be started while idle (no hand in progress).' };
@@ -2045,7 +2074,7 @@ class GameTable {
    */
   stageAllocation(requesterId, { playerId, direction, amount } = {}) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can distribute the pot.' };
+      return { ok: false, error: 'Only the Host can distribute the pot.' };
     }
     if (!this.idle) {
       return { ok: false, error: 'Pot Distribution can only be edited while idle (no hand in progress).' };
@@ -2062,7 +2091,7 @@ class GameTable {
 
   updateStagedAllocation(requesterId, allocationId, { direction, amount } = {}) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can distribute the pot.' };
+      return { ok: false, error: 'Only the Host can distribute the pot.' };
     }
     if (!this.idle) {
       return { ok: false, error: 'Pot Distribution can only be edited while idle (no hand in progress).' };
@@ -2081,7 +2110,7 @@ class GameTable {
 
   removeStagedAllocation(requesterId, allocationId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can distribute the pot.' };
+      return { ok: false, error: 'Only the Host can distribute the pot.' };
     }
     if (!this.idle) {
       return { ok: false, error: 'Pot Distribution can only be edited while idle (no hand in progress).' };
@@ -2100,7 +2129,7 @@ class GameTable {
   /** Ends the session without applying anything -- real values were never touched while staging, so this is a pure state clear. */
   discardPotDistributionBatch(requesterId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can distribute the pot.' };
+      return { ok: false, error: 'Only the Host can distribute the pot.' };
     }
     if (!this._pendingAllocationBatch) {
       return { ok: false, error: 'No Pot Distribution batch is open.' };
@@ -2127,7 +2156,7 @@ class GameTable {
    */
   commitPotDistribution(requesterId) {
     if (requesterId !== this.creatorId) {
-      return { ok: false, error: 'Only the Table Owner can distribute the pot.' };
+      return { ok: false, error: 'Only the Host can distribute the pot.' };
     }
     if (!this.idle) {
       return { ok: false, error: 'Pot Distribution can only be committed while idle (no hand in progress).' };
@@ -2170,7 +2199,25 @@ class GameTable {
     }
     this.pot = netPot;
     this._pendingAllocationBatch = null;
-    this._queueAnnouncement('The Table Owner has distributed the pot.', 'table-owner');
+    // FIXED 11.2 (Fix 4): rewritten from a bare "has distributed the
+    // pot" into an actual per-player breakdown -- one entry per player
+    // in the committed batch, ordered by seat position (this.players is
+    // already in seat order; filtering it by netByPlayer membership
+    // preserves that rather than iterating the Map's own insertion
+    // order). Sign is the negation of the already-computed `net` value
+    // above: a positive `net` means the player was a `take` target (they
+    // LOSE that amount from `target.chips -= net`), so the player-facing
+    // sign is flipped to read naturally as a gain/loss. A player whose
+    // own staged entries happen to net to exactly zero still gets an
+    // entry, reading plainly "$0" -- not omitted, and not signed.
+    const orderedEntries = this.players
+      .filter((p) => netByPlayer.has(p.id))
+      .map((p) => {
+        const gain = -netByPlayer.get(p.id);
+        const amountText = gain === 0 ? '$0' : `${gain > 0 ? '+' : '\u2212'}$${Math.abs(gain)}`;
+        return `${p.name}: ${amountText}`;
+      });
+    this._queueAnnouncement(`The Host has distributed the pot: ${orderedEntries.join('; ')}.`, 'table-owner');
     return { ok: true };
   }
 
@@ -3671,7 +3718,26 @@ class GameTable {
       const opponentCeiling = Math.max(
         ...otherOpponents.map((p) => (p.bettingCapped ? p.totalContributedThisHand : p.totalContributedThisHand + p.chips))
       );
-      if (amount > opponentCeiling) {
+      // FIXED 11.2 (Fix 3): `amount` here is a STREET-LOCAL figure (the
+      // proposed new value of player.currentBet for THIS betting round,
+      // reset every street) -- comparing it directly against
+      // `opponentCeiling` (built from `totalContributedThisHand`, a
+      // WHOLE-HAND CUMULATIVE figure) only worked by accident on a
+      // player's very first street, where the two scales happen to
+      // coincide. Once any earlier street's money is already in play,
+      // this player's own cumulative total for the hand -- their
+      // existing totalContributedThisHand PLUS what this action would
+      // actually move (`amount - player.currentBet`, the same
+      // `additional` the caller itself computes) -- is the right,
+      // unit-consistent figure to compare, matching how
+      // _checkUncalledBetRefund() already does this correctly. Live-
+      // reproduced directly against GameTable before this fix: three
+      // Players already all-in and capped at $100 total from an earlier
+      // street, the fourth (also at $100 cumulative already) betting a
+      // further $10 was incorrectly allowed, since $10 is trivially less
+      // than the $100 ceiling even though nobody could ever call it.
+      const proposedCumulativeTotal = player.totalContributedThisHand + (amount - player.currentBet);
+      if (proposedCumulativeTotal > opponentCeiling) {
         return {
           ok: false,
           error: `No remaining player could cover a raise beyond $${opponentCeiling} \u2014 use All-In if you want to commit more than that.`,
@@ -3847,6 +3913,16 @@ class GameTable {
     if (this._bringInObligationId === player.id) this._bringInObligationId = null; // NEW 7.0 (§6.8): resolved by raising over it
     this._actedSinceRaise = new Set([player.id]);
     this._recomputePots(); // NEW 9.0 (§6.10), extended 9.4
+    // NEW 11.2 (Fix 3, defense-in-depth half): _validateBetOrRaise()'s
+    // own proactive cap (just above) is the required fix and should
+    // prevent an uncallable excess from ever being created by an
+    // ordinary Bet/Raise in the first place -- this is not a
+    // duplicate/parallel safeguard replacing that, it's a backstop so
+    // this category of bug (a proactive check and a reactive one
+    // silently drifting out of unit-agreement, exactly what happened
+    // here) can't slip through both layers at once again. A correct
+    // proactive cap makes this call a no-op in practice.
+    this._checkUncalledBetRefund();
     this.currentTurnPlayerId = this._nextTurnPlayerId();
     this._maybeCloseBettingRound();
     return { ok: true };
@@ -4088,6 +4164,21 @@ class GameTable {
   postAnteBlind(requesterId) {
     const player = this.getPlayer(requesterId);
     if (!player) return { ok: false, error: 'Player not found.' };
+    // FIXED 11.2 (Fix 2, defense-in-depth half): the required fix is
+    // oweAnte actually being reset by _performFullReset() (see its own
+    // comment) -- this phase gate is an additional, independent
+    // safeguard so this endpoint can't be exploited through some OTHER
+    // stale-per-player-field-surviving-a-reset bug in the future, the
+    // same category of issue as the one that motivated the required
+    // fix. Scoped to phase-gated profiles only: the legacy no-Game-
+    // Choice "flexible toolbox" mode never transitions `handPhase` away
+    // from its constructor default ('PreGame') at all -- it has no real
+    // phase machine to gate against in the first place (confirmed by an
+    // existing pre-11.2 test exercising postAnteBlind() in exactly that
+    // mode; gating unconditionally broke it).
+    if (isPhaseGated(this.profile) && this.handPhase !== 'RequestAntes') {
+      return { ok: false, error: 'Ante/blind posting is only available during the Ante Phase.' };
+    }
     if (player.oweAnte <= 0) return { ok: false, error: "You don't owe an ante/blind." };
     // REVERTED 10.4 (the-cut-spec_v10-4.md B.2, superseding the 10.3
     // partial-post fix): the partial-post approach shipped in 10.3

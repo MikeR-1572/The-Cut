@@ -1,7 +1,85 @@
-# The Cut — Card Dealing & Betting Engine (v11.3)
+# The Cut — Card Dealing & Betting Engine (v11.4)
 
-**Reconnect Resilience, Landing-Page Socket Robustness, Code Alphabet
-Fix** — built from `the-cut-spec_v11-3.md`. `npm test` — **444 tests**
+**Client Heartbeat, Badge Ticker, Field Order, Uncallable-Bet Gating**
+— built from `the-cut-spec_v11-4.md`, consolidating findings from
+extended 11.3 play-testing. `npm test` — **449 tests** (up from 444 in
+v11.3 — 5 new, in `test/gameTable-11-4.test.js`). Live end-to-end
+verification run and passed (`live_test_11_4.js`), plus a re-run of
+`live_test_11_0.js` through `live_test_11_3.js` to confirm nothing
+regressed.
+
+## Part A — Client-side active heartbeat
+
+Confirmed live: with wifi disabled entirely across four tabs, none
+showed the "Connection Lost" popup during a 3-minute outage. Root
+cause: the server's heartbeat is one-directional — it pings the
+client, but the client has no equivalent of its own, and browsers
+don't expose WebSocket ping/pong frames to JavaScript at all. Fixed
+with a plain application-level `clientHeartbeat`/`clientHeartbeatAck`
+message pair, sent every 6s while genuinely connected at a table; no
+ack within 6s closes the socket proactively, routing through the
+exact same `close` handler already driving `startReconnectFlow()`
+(the-cut-spec_v11-3.md Part A) — no new reconnect logic needed.
+
+**Caught before shipping, not after**: the existing Part H.2 "any
+message counts as activity" hook would have treated the heartbeat
+itself as real activity, resetting the 30-minute inactivity clock
+every 6 seconds and making that timeout unreachable during ordinary
+play. Excluded `clientHeartbeat` specifically from that hook, and
+proved the fix live — a table with a shortened inactivity window still
+closed exactly on schedule despite a full second of continuous
+heartbeats running throughout.
+
+## Part B — Disconnected-player badge ticker
+
+Confirmed live: the badge started accurate, then froze until jumping
+straight to 0 at Grace Period expiry. Root cause: `secondsLeft` was
+only ever recomputed as part of a full per-player render, itself only
+triggered by an incoming `gameTableState` broadcast — and nothing else
+at the table may broadcast while everyone's simply waiting on the one
+disconnected player. Fixed with the same pattern already used for the
+reconnect dialog's own countdown: the deadline is stashed directly on
+the badge element, and a dedicated 1s ticker refreshes just that
+element's text/title, independent of server broadcast timing.
+
+## Part C — Landing page Re-Join field order
+
+Table code now first, Reconnect code second, in the "Re-join a table"
+card. Pure markup reorder — element IDs, the click handler, and
+validation were never order-dependent.
+
+## Part D — Uncallable-bet messaging and button gating
+
+**D.2 (unconditional)**: the private rejection message for a blocked
+Bet now distinguishes "no bet at all is possible" from "a smaller bet
+would still be legal" — the old message always suggested All-In as a
+working alternative, which was actively wrong advice in the first
+case. Pure string change; the underlying condition is untouched.
+Probed via the same "smallest possible amount" figure
+(`_minimumPossibleCumulativeTotal`, fixed at $1) the button-gating
+check below also uses.
+
+**D.3 (behind `GATE_BETTING_BUTTONS_WHEN_UNCALLABLE`, defaulting
+`true`)**: Bet and All-In now proactively disable in the same state,
+per the Standing Convention — Check/Fold remain available. The
+underlying check (`_opponentCeiling()`) was factored out of
+`_validateBetOrRaise()` so the new proactive `_canBetOrRaise()` reuses
+the exact same computation rather than a second copy that could drift,
+exposed as `canBetOrRaise` in `toRedactedState` following the same
+established pattern as Buy Chips's own `canBuyChips`. Client-side, the
+button-gating logic now reads this field directly instead of
+reconstructing the check itself — the pre-11.4 client-side
+reconstruction is gone. A single named constant near the top of
+`gameTable.js` reverts the whole proactive-gating behavior with no
+client-side change needed, kept as explicit Beta-window scaffolding
+per Mike's own request given how close this touches the betting rail
+to Beta.
+
+---
+
+## v11.3 — Reconnect Resilience, Landing-Page Socket Robustness, Code Alphabet Fix
+
+Built from `the-cut-spec_v11-3.md`. `npm test` — **444 tests**
 (up from 442 in v11.2 — 2 new, in `test/gameTable-11-3.test.js`). Live
 end-to-end verification run and passed for the server-side pieces
 (`live_test_11_3.js`), plus a re-run of `live_test_11_0.js`/

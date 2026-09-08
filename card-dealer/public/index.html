@@ -75,13 +75,16 @@
         <div class="lobby-card">
           <h2>Re-join a table</h2>
           <p class="hint">Got disconnected? Enter your reconnect code to pick up right where you left off.</p>
-          <label class="field">
-            <span>Reconnect code</span>
-            <input type="text" id="rejoin-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
-          </label>
+          <!-- CHANGED 11.4 (Part C): Table code first, Reconnect code
+               second -- pure markup reorder, nothing else (element IDs,
+               the click handler, validation) depends on visual order. -->
           <label class="field">
             <span>Table code</span>
             <input type="text" id="rejoin-table-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+          </label>
+          <label class="field">
+            <span>Reconnect code</span>
+            <input type="text" id="rejoin-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
           </label>
           <button class="btn btn-secondary" id="btn-rejoin-game-table" title="Reconnect using your code">Re-Join</button>
         </div>

@@ -40,5 +40,6 @@ require('./gameTable-11-0.test');
 require('./gameTable-11-1.test');
 require('./gameTable-11-2.test');
 require('./gameTable-11-3.test');
+require('./gameTable-11-4.test');
 
 console.log('\nDone.');

@@ -256,7 +256,14 @@ wss.on('connection', (ws, req) => {
     // aren't covered here (ws.meta isn't populated yet at this point for
     // those) -- each touches activity explicitly inside GameTable itself
     // instead (addPlayer()/reconnectPlayer()).
-    if (ws.meta.gameTableCode) {
+    //
+    // EXCLUDED 11.4 (Part A): 'clientHeartbeat' is a pure connection-
+    // liveness check, sent automatically every 5-8s regardless of
+    // whether the player is doing anything at all -- counting it here
+    // would keep resetting the clock every few seconds forever, making
+    // Part H.2's entire idle-but-connected timeout impossible to ever
+    // reach during normal play. Caught before this shipped, not after.
+    if (ws.meta.gameTableCode && type !== 'clientHeartbeat') {
       const activeTable = gameTables.get(ws.meta.gameTableCode);
       if (activeTable) activeTable.touchActivity();
     }
@@ -382,6 +389,15 @@ wss.on('connection', (ws, req) => {
         return handleForceDisconnectPlayer(ws, payload);
       case 'forceInactivityWarning':
         return handleForceInactivityWarning(ws);
+      case 'clientHeartbeat':
+        // NEW 11.4 (Part A): the client's own active heartbeat,
+        // symmetric to the server's existing one -- browsers don't
+        // expose WebSocket ping/pong frames to JavaScript at all, so
+        // this is an application-level message instead. No gameTable
+        // lookup needed; this is a pure connection-level liveness check,
+        // answered immediately regardless of whether this socket has
+        // even joined a table yet.
+        return send(ws, 'clientHeartbeatAck');
       default:
         return; // unknown message type: ignore
     }

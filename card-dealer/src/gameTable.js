@@ -10,6 +10,32 @@ const MAX_PLAYERS = 8;
 const MIN_PLAYERS_TO_DEAL = 2;
 const MAX_TABLE_NAME_LENGTH = 40;
 
+// Beta-window escape hatch, added for 11.4 (the-cut-spec_v11-4.md
+// Part D.3). Mike specifically wanted an easy, single-point revert
+// available while validating this against his own test scenarios,
+// given this touches the betting rail this close to Beta.
+//
+// true  (as shipped): canBetOrRaise reflects the real, already-proven
+//        check -- Bet/All-In are proactively disabled for a player
+//        who cannot legally make either succeed.
+// false (the escape hatch): canBetOrRaise is unconditionally true --
+//        buttons stay enabled exactly as they did before this
+//        release, falling back entirely to the existing behavior (a
+//        Bet gets rejected on click per D.2's message; an All-In gets
+//        accepted then silently refunded per the existing
+//        announcement). No client-side change is needed to revert --
+//        the client only ever reads what the server reports.
+//
+// TO REVERT: flip this to false and redeploy the server. Nothing else
+// needs to change.
+//
+// WHAT "DONE" LOOKS LIKE: once Mike's test scenarios confirm nothing
+// else broke, remove this flag entirely and make the gating
+// unconditional -- this is temporary scaffolding for the Beta
+// validation window, not a permanent setting or a second code path
+// meant to be maintained indefinitely.
+const GATE_BETTING_BUTTONS_WHEN_UNCALLABLE = true;
+
 // NEW 4.2 (§3): fallback values for the top-level preset flags when a
 // preset doesn't specify them (currently every Stud/Hold'em preset --
 // "not yet determined" per the spec, pending real testing of those profiles).
@@ -3703,6 +3729,53 @@ class GameTable {
   }
 
   /**
+   * NEW 11.2 (Fix 3), factored out in 11.4 (Part D.3) so
+   * _canBetOrRaise() below can reuse the exact same computation
+   * _validateBetOrRaise() already relies on, rather than a second copy
+   * that could quietly drift out of sync -- exactly the failure mode
+   * Fix 3 itself was caused by. Returns `null` when there's nobody else
+   * left in the hand for a ceiling to mean anything against (matching
+   * the 10.1 fix this whole check builds on: a never-dealt $0-chip
+   * Player at a heads-up table must not produce a $0 ceiling).
+   */
+  _opponentCeiling(player) {
+    const otherOpponents = this.players.filter((p) => p.id !== player.id && this._isHandParticipant(p));
+    if (otherOpponents.length === 0) return null;
+    return Math.max(...otherOpponents.map((p) => (p.bettingCapped ? p.totalContributedThisHand : p.totalContributedThisHand + p.chips)));
+  }
+
+  /**
+   * NEW 11.4 (Part D.2): "if this Player bet the smallest possible
+   * amount ($1), what would their cumulative total for the hand
+   * become" -- the probe used to distinguish "no bet at all is
+   * possible" (even $1 would exceed the ceiling) from "a smaller bet
+   * would still be legal" (the attempted amount was simply too big).
+   * Mirrors _validateBetOrRaise()'s own `proposedCumulativeTotal`
+   * formula exactly, with `amount` fixed at 1.
+   */
+  _minimumPossibleCumulativeTotal(player) {
+    return player.totalContributedThisHand + (1 - player.currentBet);
+  }
+
+  /**
+   * NEW 11.4 (Part D.3): the SAME check _validateBetOrRaise() already
+   * enforces reactively (rejecting a blocked Bet on click), exposed
+   * here as a proactive query -- "is ANY legal Bet/Raise currently
+   * possible for this Player at all" -- so toRedactedState() can surface
+   * it as `canBetOrRaise` and the client can disable the Bet/All-In
+   * buttons per the Standing Convention, the same established pattern
+   * already used for Buy Chips's own `canBuyChips` (_canBuyChips()).
+   * Gated behind GATE_BETTING_BUTTONS_WHEN_UNCALLABLE -- see that
+   * constant's own comment for the Beta-window revert story.
+   */
+  _canBetOrRaise(player) {
+    if (!GATE_BETTING_BUTTONS_WHEN_UNCALLABLE) return true;
+    const opponentCeiling = this._opponentCeiling(player);
+    if (opponentCeiling === null) return true;
+    return this._minimumPossibleCumulativeTotal(player) <= opponentCeiling;
+  }
+
+  /**
    * NEW 9.0 (§6.10), extended to Stud and Draw in 9.4 (renamed from
    * _validateHoldemBetOrRaise -- the whole point of 9.4 is that this
    * validation is no longer Hold'em-specific). Deliberately generic:
@@ -3738,11 +3811,8 @@ class GameTable {
     // A never-dealt $0-chip Player, the only "other opponent" at a
     // heads-up table, would give an opponentCeiling of $0 and incorrectly
     // cap a real Player's legal bet down to $0.
-    const otherOpponents = this.players.filter((p) => p.id !== player.id && this._isHandParticipant(p));
-    if (otherOpponents.length > 0) {
-      const opponentCeiling = Math.max(
-        ...otherOpponents.map((p) => (p.bettingCapped ? p.totalContributedThisHand : p.totalContributedThisHand + p.chips))
-      );
+    const opponentCeiling = this._opponentCeiling(player);
+    if (opponentCeiling !== null) {
       // FIXED 11.2 (Fix 3): `amount` here is a STREET-LOCAL figure (the
       // proposed new value of player.currentBet for THIS betting round,
       // reset every street) -- comparing it directly against
@@ -3763,6 +3833,18 @@ class GameTable {
       // than the $100 ceiling even though nobody could ever call it.
       const proposedCumulativeTotal = player.totalContributedThisHand + (amount - player.currentBet);
       if (proposedCumulativeTotal > opponentCeiling) {
+        // NEW 11.4 (Part D.2): distinguishes "a smaller bet would still
+        // be legal" from "no bet at all is possible" -- the pre-11.4
+        // message always suggested All-In as a working alternative,
+        // which is actively wrong advice in the second case. Pure
+        // string change; the condition/variables above are untouched.
+        // `_minimumPossibleCumulativeTotal(player)` is literally "what
+        // if they bet the smallest possible amount, $1" -- if even that
+        // still exceeds the ceiling, nothing smaller would have worked
+        // either, matching D.1's own "not even $1" framing exactly.
+        if (this._minimumPossibleCumulativeTotal(player) > opponentCeiling) {
+          return { ok: false, error: 'No player can cover any additional bets. You must Check to continue.' };
+        }
         return {
           ok: false,
           error: `No remaining player could cover a raise beyond $${opponentCeiling} \u2014 use All-In if you want to commit more than that.`,
@@ -4934,6 +5016,12 @@ class GameTable {
         // button reads this directly instead of reconstructing it from
         // `pending` alone -- see _canBuyChips()'s own doc comment.
         canBuyChips: this._canBuyChips(p),
+        // NEW 11.4 (Part D.3): same Standing Convention pattern as
+        // canBuyChips above -- the client's Bet/All-In buttons read this
+        // directly instead of reconstructing the check themselves. See
+        // _canBetOrRaise()'s own doc comment, including the
+        // GATE_BETTING_BUTTONS_WHEN_UNCALLABLE revert story.
+        canBetOrRaise: this._canBetOrRaise(p),
         // NEW 10.1 (the-cut-spec_v10-1.md §8.2): the raw
         // _isHandParticipant() answer, exposed directly so the client
         // never has to reconstruct "dealt in, not folded, not sitting

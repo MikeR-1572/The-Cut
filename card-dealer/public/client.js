@@ -42,6 +42,9 @@
     connectingAttempt: null, // Part B.2 -- the in-flight "opening a fresh main socket" WebSocket, if any
     pendingLobbyButton: null, // Part B.2 -- which lobby button (if any) is showing "Connecting…"
     reconnectFlowActive: false, // Part A -- true from disconnect detection until success or a deliberate leave
+    // NEW 11.4 (Part A): the client's own active heartbeat.
+    clientHeartbeatTimer: null,
+    clientHeartbeatAckTimeout: null,
     reconnectAttemptInFlight: false, // Part A.4 -- the shared "one attempt in flight" flag
     reconnectGraceDeadline: null, // Part A.5 -- Date.now() + the Grace Period, captured once at disconnect
     reconnectExpired: false, // Part A.5 -- flips once, switches the popup from countdown to "Rejoin" mode
@@ -567,6 +570,7 @@
     if (state.reconnectFlowActive) return;
     state.reconnectFlowActive = true;
     state.reconnectExpired = false;
+    stopClientHeartbeat(); // NEW 11.4 (Part A) -- no longer genuinely connected; restarted fresh on the next successful 'joined'
 
     // A.5: the outcome (fold vs. checked-through) is already fully
     // determined by the last known betting state at the moment of
@@ -597,6 +601,63 @@
     state.reconnectTimer = null;
     state.reconnectCountdownTicker = null;
     if (el.reconnectDialog.open) el.reconnectDialog.close();
+  }
+
+  // ---- Client-side active heartbeat (NEW 11.4, Part A) ----
+
+  const CLIENT_HEARTBEAT_INTERVAL_MS = 6000; // "every 5-8 seconds"
+  const CLIENT_HEARTBEAT_ACK_TIMEOUT_MS = 6000; // "a reasonable window"
+
+  /**
+   * NEW 11.4 (Part A): symmetric to the server's own heartbeat. The
+   * server actively pings every client and can tell within 10-15s if a
+   * pong doesn't return -- the client had no equivalent of its own,
+   * since browsers don't expose WebSocket ping/pong frames to
+   * JavaScript at all. Confirmed live: with wifi disabled entirely, the
+   * client-side socket just sits idle waiting for data that will never
+   * arrive, and detecting that purely by absence falls back to the OS's
+   * own TCP dead-peer detection -- hours by default on Windows, nowhere
+   * close to the 10-15s the server already achieves. This is a plain
+   * application-level message (`clientHeartbeat`/`clientHeartbeatAck`)
+   * for exactly that reason. Only runs while genuinely connected at a
+   * table (started from the 'joined' handler, which fires for both an
+   * original join/create AND a successful reconnect) -- never during a
+   * reconnect ATTEMPT itself, which already has its own dedicated
+   * short timeout (attemptReconnectOnce()) and doesn't need a second,
+   * redundant one layered on top.
+   */
+  function startClientHeartbeat() {
+    stopClientHeartbeat();
+    state.clientHeartbeatTimer = setInterval(() => {
+      const ws = state.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (state.clientHeartbeatAckTimeout) return; // one in flight already -- skip this tick, same shared-flag shape as A.4's reconnect attempts
+      state.clientHeartbeatAckTimeout = setTimeout(() => {
+        state.clientHeartbeatAckTimeout = null;
+        // No ack within the window -- don't wait for the browser to
+        // eventually notice on its own. Closing here triggers the exact
+        // same 'close' handler already driving startReconnectFlow() (Part
+        // A of the-cut-spec_v11-3.md) -- no new reconnect logic needed.
+        try {
+          ws.close();
+        } catch {
+          // already closed/closing
+        }
+      }, CLIENT_HEARTBEAT_ACK_TIMEOUT_MS);
+      try {
+        ws.send(JSON.stringify({ type: 'clientHeartbeat' }));
+      } catch {
+        // send() failing here means the socket is already on its way
+        // out -- the ack timeout above will close it shortly regardless.
+      }
+    }, CLIENT_HEARTBEAT_INTERVAL_MS);
+  }
+
+  function stopClientHeartbeat() {
+    clearInterval(state.clientHeartbeatTimer);
+    state.clientHeartbeatTimer = null;
+    clearTimeout(state.clientHeartbeatAckTimeout);
+    state.clientHeartbeatAckTimeout = null;
   }
 
   /**
@@ -652,6 +713,7 @@
         state.isReconnect = msg.isReconnect === true;
         saveSessionForReconnect(); // NEW 11.3 (Part A.7)
         stopReconnectFlow(); // NEW 11.3 (Part A) -- a no-op unless this WAS a recovery from a lost connection
+        startClientHeartbeat(); // NEW 11.4 (Part A) -- (re)starts fresh on every successful join/reconnect
         showTableView();
         break;
       case 'gameTableState': {
@@ -676,14 +738,20 @@
       case 'leftTable': // NEW 11.0 (Part F.1/F.2)
         state.deliberatelyLeaving = true; // NEW 11.3 (Part A) -- don't let the resulting close ALSO start the reconnect flow
         clearSessionForReconnect(); // NEW 11.3 (Part A.7)
+        stopClientHeartbeat(); // NEW 11.4 (Part A)
         showTableError('You left the table. Returning to the lobby\u2026');
         setTimeout(() => window.location.href = '/', 1500);
         break;
       case 'tableEnded': // NEW 11.0 (Part F.6/H.2)
         state.deliberatelyLeaving = true; // NEW 11.3 (Part A)
         clearSessionForReconnect(); // NEW 11.3 (Part A.7)
+        stopClientHeartbeat(); // NEW 11.4 (Part A)
         showTableError(msg.message || 'This table has ended. Returning to the lobby\u2026');
         setTimeout(() => window.location.href = '/', 1500);
+        break;
+      case 'clientHeartbeatAck': // NEW 11.4 (Part A)
+        clearTimeout(state.clientHeartbeatAckTimeout);
+        state.clientHeartbeatAckTimeout = null;
         break;
       case 'dealError':
         showTableError(msg.message);
@@ -1729,6 +1797,28 @@
   // state, no new network call, so the tighter tick costs nothing.
   setInterval(() => {
     if (state.lastGameTable) renderInactivityWarning(state.lastGameTable);
+  }, 1000);
+
+  /**
+   * NEW 11.4 (Part B): a lightweight, dedicated 1s ticker for the
+   * "Disconnected (Ns)" badge, mirroring the exact same pattern already
+   * used for the reconnect dialog's own countdown
+   * (renderReconnectDialog(), the-cut-spec_v11-3.md Part A.5) and the
+   * inactivity banner/popup just above -- a pure text refresh from
+   * already-known state (the deadline stashed on the element itself),
+   * independent of server broadcast timing. Only touches badges
+   * currently in the DOM; a no-op the overwhelming majority of the time
+   * when nobody's disconnected.
+   */
+  function updateDisconnectedBadgeText(badgeEl) {
+    const deadline = Number(badgeEl.dataset.disconnectDeadline);
+    const name = badgeEl.dataset.playerName;
+    const secondsLeft = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+    badgeEl.title = `${name} disconnected -- the table will wait ${secondsLeft}s more before moving them to Sitting Out`;
+    badgeEl.textContent = `Disconnected (${secondsLeft}s)`;
+  }
+  setInterval(() => {
+    document.querySelectorAll('.seat-disconnected-badge').forEach(updateDisconnectedBadgeText);
   }, 1000);
 
   // ---- About modal (NEW 4.1 §10.7) ----
@@ -3039,11 +3129,18 @@
       el.btnCheck.disabled = gameTable.currentBetToCall !== me.currentBet;
 
       const betWouldBeAllIn = isPhaseGatedProfile && minLegalTotal >= ownStackCap;
-      // NEW 9.1: also unusable if even the minimum would exceed what any
-      // opponent could cover -- same "use All-In instead" redirect,
-      // different underlying reason (Fixed-Limit's exact size can't be
-      // reduced to fit, so there's no smaller legal amount to offer).
-      const betExceedsOpponentCeiling = isPhaseGatedProfile && minLegalTotal > opponentCeiling;
+      // CHANGED 11.4 (Part D.3): was a client-side reconstruction
+      // (`minLegalTotal > opponentCeiling`) of the same check the server
+      // already performs authoritatively in _validateBetOrRaise() --
+      // replaced with reading `canBetOrRaise` directly, per the Standing
+      // Convention and the same established pattern already used for
+      // Buy Chips's own `canBuyChips`: the server computes the real
+      // answer once, the client never re-derives it. Gated server-side
+      // behind GATE_BETTING_BUTTONS_WHEN_UNCALLABLE -- when that flag is
+      // off (the Beta-window revert), `canBetOrRaise` is unconditionally
+      // true, so this naturally falls back to the pre-11.4 behavior
+      // (buttons stay enabled; a blocked Bet is rejected on click).
+      const betExceedsOpponentCeiling = isPhaseGatedProfile && me.canBetOrRaise === false;
       // NEW 9.2 (§6.10), extended 9.4: proactive raise-cap prevention --
       // once the cap is already reached (and heads-up doesn't waive it),
       // Bet/Raise is unusable for this reason too, checked before the
@@ -3083,15 +3180,34 @@
         el.btnPlaceBet.textContent = gameTable.currentBetToCall > 0 ? `Raise To $${minLegalTotal}` : `Bet $${minLegalTotal}`;
       } else {
         delete el.btnPlaceBet.dataset.fixedAmount;
-        el.btnPlaceBet.textContent = betUnusable ? `${verb} (use All In)` : verb;
+        // CHANGED 11.4 (Part D.2): betExceedsOpponentCeiling now means
+        // specifically "not even $1 is possible" (see canBetOrRaise's
+        // own comment) -- "(use All In)" is actively wrong advice in
+        // that exact case (All-In would just get silently refunded),
+        // so this label branch now distinguishes it from the OTHER
+        // reason the button might be unusable (betWouldBeAllIn/
+        // raiseCapReached), where "(use All In)" or a plain disabled
+        // state remains the right label.
+        el.btnPlaceBet.textContent = betExceedsOpponentCeiling ? verb : betUnusable ? `${verb} (use All In)` : verb;
       }
       el.btnPlaceBet.title = betWouldBeAllIn
         ? 'Any legal bet/raise here would commit your entire stack \u2014 use All In instead.'
         : betExceedsOpponentCeiling
-          ? `No remaining player could cover a raise beyond $${opponentCeiling} \u2014 use All In instead.`
+          ? 'No player can cover any additional bets. You must Check to continue.'
           : raiseCapReached
             ? 'No more raises are allowed this round \u2014 the raise cap has been reached.'
             : 'Bet or raise to the entered total';
+
+      // CHANGED 11.4 (Part D.3): All-In is disabled alongside Bet/Raise
+      // in this exact state -- both are equally impossible to legally
+      // complete (an All-In here would just get silently refunded by
+      // _checkUncalledBetRefund() rather than genuinely committing
+      // anything), so per the Standing Convention there's no reason to
+      // leave it clickable only to bounce off that a moment later.
+      if (isPhaseGatedProfile && !allInWouldBeRedundant && betExceedsOpponentCeiling) {
+        el.btnAllIn.disabled = true;
+        el.btnAllIn.title = 'No player can cover any additional bets. You must Check to continue.';
+      }
 
       // NEW 9.0 (§6.10): "the betting UI should compute and display the
       // current legal minimum and maximum raise as live numbers whenever
@@ -3476,9 +3592,18 @@
       // never re-derives it from a locally-ticking clock.
       const disconnectedBadge = document.createElement('span');
       disconnectedBadge.className = 'seat-sitting-out-badge seat-disconnected-badge';
-      const secondsLeft = Math.max(0, Math.round((player.disconnectDeadline - Date.now()) / 1000));
-      disconnectedBadge.title = `${player.name} disconnected -- the table will wait ${secondsLeft}s more before moving them to Sitting Out`;
-      disconnectedBadge.textContent = `Disconnected (${secondsLeft}s)`;
+      // CHANGED 11.4 (Part B): the deadline/name are stashed on the
+      // element itself so updateDisconnectedBadgeText()'s own dedicated
+      // 1s ticker (below) can refresh just this badge's text/title
+      // directly, independent of whether anything else at the table
+      // happens to trigger a fresh gameTableState broadcast in the
+      // meantime -- confirmed live: the badge was freezing at its
+      // initial value and jumping straight to 0 at expiry otherwise,
+      // since nothing else may broadcast while everyone's simply
+      // waiting on the one disconnected player.
+      disconnectedBadge.dataset.disconnectDeadline = String(player.disconnectDeadline);
+      disconnectedBadge.dataset.playerName = player.name;
+      updateDisconnectedBadgeText(disconnectedBadge);
       info.appendChild(disconnectedBadge);
     }
     if (player.pendingDeparture) {

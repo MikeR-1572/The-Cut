@@ -679,6 +679,23 @@
       </div>
     </dialog>
 
+    <!-- ---- Connection Lost / Reconnect popup (NEW 11.3, Part A.5):
+         a single continuous phase per A.3's own correction -- automatic
+         retry and this manual button both run for the entire Grace
+         Period, never staged sequentially. No close affordance: this
+         reflects an unavoidable state, not something to dismiss while
+         the underlying problem persists -- see the 'cancel' listener in
+         client.js that blocks Escape from closing it. See
+         renderReconnectDialog() in client.js. ---- -->
+    <dialog id="reconnect-dialog" class="chip-dialog">
+      <h3>Connection Lost</h3>
+      <p class="dialog-hint" id="reconnect-dialog-message">Trying to reconnect&hellip;</p>
+      <p class="dialog-hint" id="reconnect-dialog-countdown"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-primary" id="btn-manual-reconnect">Reconnect</button>
+      </div>
+    </dialog>
+
     <!-- ---- Reusable app-styled confirmation dialog (NEW 11.1, Fix 2):
          replaces every window.confirm() call in the app -- native
          browser confirm() left nowhere. See appConfirm() in client.js. ---- -->

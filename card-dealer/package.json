@@ -1,7 +1,7 @@
 {
   "name": "card-dealer-app",
-  "version": "11.2.0",
-  "buildDate": "2026-09-07",
+  "version": "11.3.0",
+  "buildDate": "2026-09-08",
   "private": true,
   "description": "Generic multiplayer card-dealing engine (deck/shuffle/deal/rooms/roles) with a vanilla JS client.",
   "main": "server.js",

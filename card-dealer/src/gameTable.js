@@ -316,7 +316,16 @@ class GameTable {
    * not globally, which is all §5 of the reconnect design actually needs).
    */
   _generateReconnectCode() {
-    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    // FIXED 11.3 (Part C): both `0` (zero) and `O` (letter O) removed --
+    // confirmed as a real, recurring problem during testing, not
+    // hypothetical. Removing only one side would still leave a future
+    // player with no way to know which one was kept, so both go
+    // together. `1`/`I` deliberately kept, per Mike's own judgment that
+    // those two remain visually distinguishable enough in practice.
+    // 34 characters now, down from 36 -- 34^6 (~1.54 billion) vs. 36^6
+    // (~2.18 billion) is a negligible reduction against the real threat
+    // model (a rate-limited human guesser).
+    const ALPHABET = 'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789';
     let code;
     do {
       code = '';
@@ -469,8 +478,24 @@ class GameTable {
    * learn whether the code was merely wrong vs. correct-but-blocked.
    */
   reconnectPlayer(code) {
-    const player = this.players.find((p) => p.reconnectCode === code && !p.connected);
-    if (!player) return { ok: false, error: 'Invalid reconnect code.' };
+    // FIXED 11.3 (Part A.8): the rate-limiter correction needs to
+    // distinguish "this code matches nobody at all" (genuine guessing --
+    // should count against the per-IP limiter) from "this code is
+    // genuinely correct, but rejected only for timing reasons" (already
+    // reconnected, or blocked by the multi-device rule -- must NOT
+    // count). `codeMatchedNoPlayer` on the result is exactly that
+    // distinction; server.js's rate limiter reads it directly rather
+    // than re-deriving it from the error message text.
+    const matchedPlayer = this.players.find((p) => p.reconnectCode === code);
+    if (!matchedPlayer) return { ok: false, error: 'Invalid reconnect code.', codeMatchedNoPlayer: true };
+    if (matchedPlayer.connected) {
+      // Deliberately the SAME error text as "no such code" -- see this
+      // method's own pre-11.3 comment about not letting a guesser learn
+      // anything from which case they hit. Only the internal
+      // codeMatchedNoPlayer flag (never sent to the client) tells them apart.
+      return { ok: false, error: 'Invalid reconnect code.', codeMatchedNoPlayer: false };
+    }
+    const player = matchedPlayer;
     player.connected = true;
     player.disconnectedAt = null;
     // Deliberately NOT clearing sittingOut here -- see expireDisconnectGrace()'s

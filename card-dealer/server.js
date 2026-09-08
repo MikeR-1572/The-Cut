@@ -110,27 +110,43 @@ function clientIp(req) {
 }
 
 /**
- * NEW 11.0 (Part D). Returns { limited: true } if this IP is currently
- * in a cooldown and should be rejected outright without even checking
- * the code; otherwise records this attempt and returns { limited: false }.
- * Deliberately silent either way at the call site -- no table-wide alert
- * on a failed/blocked attempt, per the spec's own explicit decision.
+ * NEW 11.0 (Part D). Whether this IP is currently in a cooldown and
+ * should be rejected outright without even checking the code.
+ * CHANGED 11.3 (Part A.8): no longer records the attempt itself -- that
+ * moved to recordFailedReconnectAttempt() below, called only once the
+ * caller knows whether this was a genuine guess (see its own comment
+ * for why that distinction matters).
  */
-function checkReconnectRateLimit(ip) {
+function isReconnectRateLimited(ip) {
+  const entry = reconnectAttemptsByIp.get(ip);
+  return !!(entry && entry.cooldownUntil > Date.now());
+}
+
+/**
+ * NEW 11.3 (Part A.8): only a code that matches nobody at all counts
+ * against the per-IP limit now -- a legitimate player's own correct
+ * code, rejected merely for timing (an attempt landing right as another
+ * one already succeeded, or blocked by the multi-device rule), must
+ * never count. With automatic retry and a repeatable manual button both
+ * potentially firing several attempts within one Grace Period (Part A),
+ * the old "every failed attempt counts" version risked tripping this
+ * limiter against a player retrying their own correct code through no
+ * fault of their own. This isn't a workaround -- it corrects what the
+ * limiter was actually supposed to be measuring in the first place;
+ * real guessing is still caught exactly as before.
+ */
+function recordFailedReconnectAttempt(ip) {
   const now = Date.now();
   let entry = reconnectAttemptsByIp.get(ip);
   if (!entry) {
     entry = { attempts: [], cooldownUntil: 0 };
     reconnectAttemptsByIp.set(ip, entry);
   }
-  if (entry.cooldownUntil > now) return { limited: true };
   entry.attempts = entry.attempts.filter((t) => now - t < RECONNECT_RATE_LIMIT_WINDOW_MS);
   entry.attempts.push(now);
   if (entry.attempts.length > RECONNECT_RATE_LIMIT_MAX_ATTEMPTS) {
     entry.cooldownUntil = now + RECONNECT_RATE_LIMIT_COOLDOWN_MS;
-    return { limited: true };
   }
-  return { limited: false };
 }
 
 function send(ws, type, payload = {}) {
@@ -891,20 +907,31 @@ function handleSitIn(ws) {
  */
 function handleReconnectToGameTable(ws, { gameTableCode, code }, req) {
   const ip = clientIp(req);
-  const { limited } = checkReconnectRateLimit(ip);
   // Deliberately the SAME generic error for rate-limited vs. wrong-code
   // vs. table-not-found -- no distinction that would help a guesser learn
   // anything about which case they hit.
   const GENERIC_ERROR = 'Unable to reconnect with that code. Check the code and try again.';
-  if (limited) return send(ws, 'reconnectError', { message: GENERIC_ERROR });
+  if (isReconnectRateLimited(ip)) return send(ws, 'reconnectError', { message: GENERIC_ERROR });
 
   const tableCode = (typeof gameTableCode === 'string' ? gameTableCode : '').trim().toUpperCase();
   const gameTable = gameTables.get(tableCode);
   const trimmedCode = (typeof code === 'string' ? code : '').trim().toUpperCase();
-  if (!gameTable || !trimmedCode) return send(ws, 'reconnectError', { message: GENERIC_ERROR });
+  if (!gameTable || !trimmedCode) {
+    // No real table/code to even check against -- structurally the same
+    // "this attempt didn't correspond to anything real" shape as a code
+    // matching no player, so it counts the same way.
+    recordFailedReconnectAttempt(ip);
+    return send(ws, 'reconnectError', { message: GENERIC_ERROR });
+  }
 
   const result = gameTable.reconnectPlayer(trimmedCode);
-  if (!result.ok) return send(ws, 'reconnectError', { message: GENERIC_ERROR });
+  if (!result.ok) {
+    // CHANGED 11.3 (Part A.8): only count it if the code genuinely
+    // matched nobody -- a correct code rejected merely for timing
+    // (already reconnected, or the multi-device rule) must not.
+    if (result.codeMatchedNoPlayer) recordFailedReconnectAttempt(ip);
+    return send(ws, 'reconnectError', { message: GENERIC_ERROR });
+  }
 
   const { playerId } = result;
   const existingTimer = disconnectTimers.get(playerId);

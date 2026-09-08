@@ -36,6 +36,19 @@
     wasShowingTurnActions: false, // NEW 5.1 (bug fix) -- edge-triggered Bet/Raise box clearing; see renderBettingRail
     myReconnectCode: null, // NEW 11.0 (Part D) -- this Player's own code, shown so they don't have to ask the Host for it
     isReconnect: false, // NEW 11.2 (Fix 6) -- set from the 'joined' message's own field
+
+    // NEW 11.3 (Part A/B): reconnect resilience + landing-page socket robustness.
+    messageQueue: [], // Part B.2 -- queued sends while state.ws isn't open
+    connectingAttempt: null, // Part B.2 -- the in-flight "opening a fresh main socket" WebSocket, if any
+    pendingLobbyButton: null, // Part B.2 -- which lobby button (if any) is showing "Connecting…"
+    reconnectFlowActive: false, // Part A -- true from disconnect detection until success or a deliberate leave
+    reconnectAttemptInFlight: false, // Part A.4 -- the shared "one attempt in flight" flag
+    reconnectGraceDeadline: null, // Part A.5 -- Date.now() + the Grace Period, captured once at disconnect
+    reconnectExpired: false, // Part A.5 -- flips once, switches the popup from countdown to "Rejoin" mode
+    reconnectWillFold: false, // Part A.5 -- computed once at disconnect from the last known betting state
+    reconnectTimer: null, // Part A.4 -- the automatic-retry interval handle
+    reconnectCountdownTicker: null, // Part A.5 -- the popup's own 1s re-render interval
+    deliberatelyLeaving: false, // Part A -- set on leftTable/tableEnded so the resulting close doesn't ALSO start the reconnect flow
   };
 
   // ---- DOM refs ----
@@ -198,6 +211,12 @@
     btnTestingClose: document.getElementById('btn-testing-close'),
 
     // NEW 11.1 (Fix 2): reusable app-styled confirm, replacing window.confirm()
+    // NEW 11.3 (Part A.5): Connection Lost / Reconnect popup.
+    reconnectDialog: document.getElementById('reconnect-dialog'),
+    reconnectDialogMessage: document.getElementById('reconnect-dialog-message'),
+    reconnectDialogCountdown: document.getElementById('reconnect-dialog-countdown'),
+    btnManualReconnect: document.getElementById('btn-manual-reconnect'),
+
     appConfirmDialog: document.getElementById('app-confirm-dialog'),
     appConfirmMessage: document.getElementById('app-confirm-message'),
     btnAppConfirmOk: document.getElementById('btn-app-confirm-ok'),
@@ -293,16 +312,29 @@
 
   // ---- connection ----
 
+  /**
+   * CHANGED 11.3 (Part B.2): the main connection, used at initial page
+   * load. `onOpen`/`onFailed` let callers (specifically the sessionStorage
+   * auto-reconnect-on-load path, Part A.7) hook the outcome without this
+   * function needing to know about them itself.
+   */
   function connect() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${location.host}`);
     state.ws = ws;
 
     ws.addEventListener('open', () => {
+      // CHANGED 11.3 (Part B.2): flush anything send() queued while this
+      // connection was opening, in the exact order it was queued.
+      const queued = state.messageQueue;
+      state.messageQueue = [];
+      for (const raw of queued) ws.send(raw);
+      restorePendingLobbyButton();
+
       // NEW 11.0 (Part D): safe to auto-submit only once the socket is
-      // actually open -- send() silently no-ops otherwise. Fields are
-      // pre-filled at page load by maybeAutoFillRejoinFromUrl() below;
-      // this just performs the actual submit once there's a live socket.
+      // actually open. Fields are pre-filled at page load by
+      // maybeAutoFillRejoinFromUrl() below; this just performs the
+      // actual submit once there's a live socket.
       if (state.autoRejoinPending) {
         state.autoRejoinPending = false;
         el.btnRejoinGameTable.click();
@@ -320,19 +352,291 @@
     });
 
     ws.addEventListener('close', () => {
-      if (!el.viewGameTableTop.hidden) {
-        showTableError('Connection to the table was lost. Refresh to start a new session.');
-      } else {
-        showLobbyError('Connection lost. Refresh the page and try again.');
+      // CHANGED 11.3 (Part A): a lost connection while genuinely seated
+      // at a table now starts the real reconnect-resilience flow
+      // (Part A) instead of just telling the player to refresh. A lost
+      // connection while still on the landing page needs no special
+      // handling at all anymore -- Part B.2 made send() itself
+      // transparently reconnect on the next click, so there's nothing
+      // to alarm the player about here. `deliberatelyLeaving` guards
+      // against this ALSO firing right after a real Leave Table/End
+      // Game teardown, which already handles its own navigation.
+      if (!el.viewGameTableTop.hidden && state.playerId && !state.deliberatelyLeaving) {
+        startReconnectFlow();
       }
     });
   }
 
+  /**
+   * NEW 11.3 (Part B.2): send() itself is now robust to a not-open
+   * socket -- rather than a separate background reconnect ticker
+   * guessing when to proactively reopen an idle landing-page socket
+   * (confirmed root cause: the shared heartbeat loop pings every
+   * connected socket, landing-page ones included, so one left idle for
+   * 20-30s while a player looks up their code was just as subject to
+   * the same ~10-12s detection window and termination as an in-table
+   * one -- and send()'s old silent readyState guard meant a click on a
+   * now-dead socket did visibly nothing at all). A not-open socket now
+   * transparently opens a fresh one, queues the message, and flushes it
+   * the instant that connection's own 'open' handler (above) fires --
+   * one unified mechanism that also incidentally covers the rarer
+   * "clicked before the very first handshake finished" case.
+   */
   function send(type, payload = {}) {
+    const raw = JSON.stringify({ type, ...payload });
     if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-      state.ws.send(JSON.stringify({ type, ...payload }));
+      state.ws.send(raw);
+      return;
+    }
+    state.messageQueue.push(raw);
+    if (!state.ws || state.ws.readyState !== WebSocket.CONNECTING) {
+      connect();
     }
   }
+
+  /**
+   * NEW 11.3 (Part B.2): shows "Connecting…" on whichever lobby button
+   * triggered a send() that had to queue -- so a click never again just
+   * silently evaporates. Restored automatically once the queued message
+   * actually flushes (see connect()'s own 'open' handler), or after a
+   * short safety timeout in case the connection never opens at all.
+   */
+  function markLobbyButtonConnecting(button) {
+    if (state.pendingLobbyButton) return; // already showing on some button
+    state.pendingLobbyButton = button;
+    button.dataset.originalLabel = button.textContent;
+    button.textContent = 'Connecting\u2026';
+    button.disabled = true;
+    state.pendingLobbyButtonTimeout = setTimeout(restorePendingLobbyButton, 6000);
+  }
+
+  function restorePendingLobbyButton() {
+    if (!state.pendingLobbyButton) return;
+    clearTimeout(state.pendingLobbyButtonTimeout);
+    const button = state.pendingLobbyButton;
+    button.textContent = button.dataset.originalLabel;
+    button.disabled = false;
+    state.pendingLobbyButton = null;
+  }
+
+  // ---- Reconnect Resilience (NEW 11.3, Part A) ----
+
+  const RECONNECT_RETRY_INTERVAL_MS = 2500; // A.4: "every 2-3 seconds"
+  const RECONNECT_ATTEMPT_TIMEOUT_MS = 3500; // A.4: "on the order of 3-4 seconds"
+  const SESSION_STORAGE_KEY = 'theCutSession'; // A.7
+
+  function saveSessionForReconnect() {
+    try {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ gameTableCode: state.gameTableCode, reconnectCode: state.myReconnectCode }));
+    } catch {
+      // sessionStorage unavailable (private browsing, etc.) -- the rest
+      // of the app works fine without it; this is a pure enhancement.
+    }
+  }
+
+  function clearSessionForReconnect() {
+    try {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // see saveSessionForReconnect()'s own comment
+    }
+  }
+
+  function loadSessionForReconnect() {
+    try {
+      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.gameTableCode && parsed.reconnectCode) return parsed;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * NEW 11.3 (Part A.4): the one underlying reconnect operation, shared
+   * verbatim by the automatic timer and the manual button -- they differ
+   * only in what triggers each attempt, never in what the attempt itself
+   * does. `onSettled(success)` lets a caller (specifically the
+   * sessionStorage-on-load path, Part A.7) react to the outcome; the
+   * disconnect-flow's own timer/button just ignore it and let the
+   * ongoing flow keep ticking either way.
+   *
+   * Deliberately its own dedicated WebSocket per attempt, NOT a call
+   * through send()/connect() -- this needs its own short, independent
+   * timeout (a connection that hangs silently, rather than actively
+   * refusing, must not be allowed to block the shared in-flight flag
+   * far longer than the intended retry cadence) and its own
+   * success/failure branch, neither of which send()'s generic queue-
+   * and-flush mechanism was built to provide.
+   */
+  function attemptReconnectOnce(gameTableCode, reconnectCode, onSettled) {
+    if (state.reconnectAttemptInFlight) return; // shared in-flight rule (A.4)
+    state.reconnectAttemptInFlight = true;
+    renderReconnectDialog();
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const attemptWs = new WebSocket(`${protocol}//${location.host}`);
+    let settled = false;
+
+    function finish(success) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      state.reconnectAttemptInFlight = false;
+      renderReconnectDialog();
+      if (onSettled) onSettled(success);
+    }
+
+    const timeoutHandle = setTimeout(() => {
+      try {
+        attemptWs.close();
+      } catch {
+        // already closed/closing -- nothing further to do
+      }
+      finish(false);
+    }, RECONNECT_ATTEMPT_TIMEOUT_MS);
+
+    attemptWs.addEventListener('open', () => {
+      attemptWs.send(JSON.stringify({ type: 'reconnectToGameTable', gameTableCode, code: reconnectCode }));
+    });
+    attemptWs.addEventListener('message', (event) => {
+      if (settled) return;
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (msg.type === 'joined') {
+        adoptSocket(attemptWs);
+        handleServerMessage(msg); // sets state.playerId, calls showTableView(), etc.
+        finish(true);
+      } else if (msg.type === 'reconnectError') {
+        try {
+          attemptWs.close();
+        } catch {
+          // already closing
+        }
+        finish(false);
+      }
+    });
+    attemptWs.addEventListener('close', () => finish(false));
+  }
+
+  /**
+   * NEW 11.3 (Part A.4): promotes a successful reconnect attempt's own
+   * socket to be the app's main connection going forward -- wired with
+   * the exact same message/close handling connect()'s own socket uses,
+   * so ongoing play continues normally through it.
+   */
+  function adoptSocket(ws) {
+    state.ws = ws;
+    ws.addEventListener('message', (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      handleServerMessage(msg);
+    });
+    ws.addEventListener('close', () => {
+      if (!el.viewGameTableTop.hidden && state.playerId && !state.deliberatelyLeaving) {
+        startReconnectFlow();
+      }
+    });
+  }
+
+  /**
+   * NEW 11.3 (Part A): called once, the moment the main socket is
+   * detected lost while genuinely seated at a table. Runs the automatic
+   * timer AND leaves the manual button live for the ENTIRE Grace
+   * Period, per A.3's own correction -- an earlier draft staged these
+   * as sequential phases (silent auto-retry, then manual-only once that
+   * "failed"), which was wrong: if background-tab throttling can
+   * suppress the automatic timer (the same throttling responsible for a
+   * real share of disconnects during same-machine multi-tab testing),
+   * that's exactly the scenario where an automatic-only phase might
+   * silently not be running, with no way for the player to know. A
+   * manual click reliably works in that exact case, since clicking a
+   * tab necessarily brings it into focus first.
+   */
+  function startReconnectFlow() {
+    if (state.reconnectFlowActive) return;
+    state.reconnectFlowActive = true;
+    state.reconnectExpired = false;
+
+    // A.5: the outcome (fold vs. checked-through) is already fully
+    // determined by the last known betting state at the moment of
+    // disconnect -- computed once here, mirroring the exact same
+    // "amount owed" figure the ordinary betting rail's own "$YY to You"
+    // UI is built from, and the server's own _isFacingABet().
+    const gameTable = state.lastGameTable;
+    const me = gameTable?.players.find((p) => p.id === state.playerId);
+    state.reconnectWillFold = !!(gameTable && me && gameTable.bettingOpen && gameTable.currentBetToCall - me.currentBet > 0);
+
+    const graceSeconds = gameTable?.reconnectTimeoutSeconds || 30;
+    state.reconnectGraceDeadline = Date.now() + graceSeconds * 1000;
+
+    renderReconnectDialog();
+    el.reconnectDialog.showModal();
+
+    const doAttempt = () => attemptReconnectOnce(state.gameTableCode, state.myReconnectCode);
+    doAttempt(); // don't wait a full interval for the very first try
+    state.reconnectTimer = setInterval(doAttempt, RECONNECT_RETRY_INTERVAL_MS);
+    state.reconnectCountdownTicker = setInterval(renderReconnectDialog, 1000);
+  }
+
+  function stopReconnectFlow() {
+    if (!state.reconnectFlowActive) return;
+    state.reconnectFlowActive = false;
+    clearInterval(state.reconnectTimer);
+    clearInterval(state.reconnectCountdownTicker);
+    state.reconnectTimer = null;
+    state.reconnectCountdownTicker = null;
+    if (el.reconnectDialog.open) el.reconnectDialog.close();
+  }
+
+  /**
+   * NEW 11.3 (Part A.5): purely a render from already-known state --
+   * ticks on its own timer (see startReconnectFlow()) rather than only
+   * re-running when something else happens to change, since the whole
+   * point is a live countdown with nothing else necessarily occurring
+   * in between ticks.
+   */
+  function renderReconnectDialog() {
+    if (!state.reconnectFlowActive) return;
+    const msRemaining = state.reconnectGraceDeadline - Date.now();
+    if (!state.reconnectExpired && msRemaining <= 0) {
+      state.reconnectExpired = true;
+      clearInterval(state.reconnectCountdownTicker);
+      state.reconnectCountdownTicker = null;
+    }
+
+    if (!state.reconnectExpired) {
+      const secondsLeft = Math.max(0, Math.ceil(msRemaining / 1000));
+      el.reconnectDialogCountdown.textContent = `${secondsLeft}s remaining`;
+      el.reconnectDialogMessage.textContent = state.reconnectWillFold
+        ? "You'll be folded."
+        : "You'll be checked through, but you can't reveal or claim the pot while disconnected.";
+      el.btnManualReconnect.textContent = state.reconnectAttemptInFlight ? 'Reconnecting\u2026' : 'Reconnect';
+    } else {
+      el.reconnectDialogCountdown.textContent = '';
+      el.reconnectDialogMessage.textContent = "You've been moved to Sitting Out. You can still reconnect at any time.";
+      el.btnManualReconnect.textContent = state.reconnectAttemptInFlight ? 'Reconnecting\u2026' : 'Rejoin';
+    }
+    el.btnManualReconnect.disabled = state.reconnectAttemptInFlight;
+  }
+
+  // Never closable by Escape -- this reflects an unavoidable state, not
+  // something to dismiss while the underlying problem persists.
+  el.reconnectDialog.addEventListener('cancel', (event) => event.preventDefault());
+
+  el.btnManualReconnect.addEventListener('click', () => {
+    attemptReconnectOnce(state.gameTableCode, state.myReconnectCode);
+  });
 
   function handleServerMessage(msg) {
     switch (msg.type) {
@@ -346,6 +650,8 @@
         // equally empty either way), which is exactly why the Buy Chips
         // prompt below was incorrectly firing on every reconnect too.
         state.isReconnect = msg.isReconnect === true;
+        saveSessionForReconnect(); // NEW 11.3 (Part A.7)
+        stopReconnectFlow(); // NEW 11.3 (Part A) -- a no-op unless this WAS a recovery from a lost connection
         showTableView();
         break;
       case 'gameTableState': {
@@ -368,10 +674,14 @@
         showLobbyError(msg.message);
         break;
       case 'leftTable': // NEW 11.0 (Part F.1/F.2)
+        state.deliberatelyLeaving = true; // NEW 11.3 (Part A) -- don't let the resulting close ALSO start the reconnect flow
+        clearSessionForReconnect(); // NEW 11.3 (Part A.7)
         showTableError('You left the table. Returning to the lobby\u2026');
         setTimeout(() => window.location.href = '/', 1500);
         break;
       case 'tableEnded': // NEW 11.0 (Part F.6/H.2)
+        state.deliberatelyLeaving = true; // NEW 11.3 (Part A)
+        clearSessionForReconnect(); // NEW 11.3 (Part A.7)
         showTableError(msg.message || 'This table has ended. Returning to the lobby\u2026');
         setTimeout(() => window.location.href = '/', 1500);
         break;
@@ -589,6 +899,18 @@
 
   // ---- lobby actions ----
 
+  /**
+   * NEW 11.3 (Part B.2): used by each lobby button so a click that has
+   * to wait for a fresh connection shows "Connecting…" immediately,
+   * rather than the button appearing to do nothing.
+   */
+  function sendFromLobbyButton(button, type, payload) {
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+      markLobbyButtonConnecting(button);
+    }
+    send(type, payload);
+  }
+
   el.btnCreateGameTable.addEventListener('click', () => {
     hideLobbyError();
     const payload = { playerName: el.createName.value };
@@ -596,7 +918,7 @@
     if (tableName) payload.tableName = tableName;
     const suggestedBuyin = el.createSuggestedBuyin.value.trim();
     if (suggestedBuyin) payload.suggestedBuyIn = parseInt(suggestedBuyin, 10);
-    send('createGameTable', payload);
+    sendFromLobbyButton(el.btnCreateGameTable, 'createGameTable', payload);
   });
 
   el.btnJoinGameTable.addEventListener('click', () => {
@@ -606,7 +928,7 @@
       showLobbyError('Enter a table code to join.');
       return;
     }
-    send('joinGameTable', { gameTableCode: code, playerName: el.joinName.value });
+    sendFromLobbyButton(el.btnJoinGameTable, 'joinGameTable', { gameTableCode: code, playerName: el.joinName.value });
   });
 
   // NEW 11.0 (Part D): the "Re-Join a Table" path -- same wire message
@@ -620,7 +942,7 @@
       showLobbyError('Enter both your reconnect code and the table code.');
       return;
     }
-    send('reconnectToGameTable', { gameTableCode: tableCode, code });
+    sendFromLobbyButton(el.btnRejoinGameTable, 'reconnectToGameTable', { gameTableCode: tableCode, code });
   });
 
   /**
@@ -3917,6 +4239,33 @@
   loadGameChoices();
   loadAppInfo();
   makeDialogsDraggable();
-  maybeAutoFillRejoinFromUrl(); // NEW 11.0 (Part D)
-  connect();
+
+  // NEW 11.3 (Part A.7): a full page reload of this same tab wipes
+  // in-memory state but not sessionStorage -- check for a cached
+  // session before showing anything else, and attempt reconnect
+  // immediately rather than making the player go through the landing
+  // page at all. Takes priority over the `?rejoin=` URL-param path
+  // below; only falls through to it if nothing was cached.
+  const cachedSession = loadSessionForReconnect();
+  if (cachedSession) {
+    // Pre-filled regardless of outcome, per A.7's own explicit
+    // requirement -- no reason to make the player retype something the
+    // browser still has, even if the automatic attempt below doesn't
+    // pan out.
+    el.rejoinCode.value = cachedSession.reconnectCode;
+    el.rejoinTableCode.value = cachedSession.gameTableCode;
+    attemptReconnectOnce(cachedSession.gameTableCode, cachedSession.reconnectCode, (success) => {
+      if (!success) {
+        // A.7's fallback cases: the table/session genuinely ended, or
+        // this cached pair is otherwise stale -- fields stay pre-filled
+        // (already set above) and an ordinary fresh lobby connection
+        // takes over normally.
+        clearSessionForReconnect();
+        connect();
+      }
+    });
+  } else {
+    maybeAutoFillRejoinFromUrl(); // NEW 11.0 (Part D)
+    connect();
+  }
 })();

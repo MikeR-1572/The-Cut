@@ -1,7 +1,108 @@
-# The Cut — Card Dealing & Betting Engine (v11.2)
+# The Cut — Card Dealing & Betting Engine (v11.3)
 
-**Table Owner Function Fixes, Host rename, and two smaller
-corrections** — built from `the-cut-spec_v11-2.md`, consolidating
+**Reconnect Resilience, Landing-Page Socket Robustness, Code Alphabet
+Fix** — built from `the-cut-spec_v11-3.md`. `npm test` — **444 tests**
+(up from 442 in v11.2 — 2 new, in `test/gameTable-11-3.test.js`). Live
+end-to-end verification run and passed for the server-side pieces
+(`live_test_11_3.js`), plus a re-run of `live_test_11_0.js`/
+`live_test_11_1.js`/`live_test_11_2.js` to confirm nothing regressed.
+
+**Verification caveat, stated plainly rather than glossed over**: Part
+A's actual reconnect mechanism (the popup, the automatic timer, the
+manual button, `sessionStorage`) is almost entirely client-side
+JavaScript coordinating real browser `WebSocket`/`dialog` APIs. This
+build's live-test harness runs Node's `ws` library directly against
+`server.js` — it cannot execute `client.js` itself, since that needs a
+real DOM this environment doesn't have. Every server-side contract
+Part A depends on is unit- and live-tested; the client-side flow
+itself has had careful code review and a syntax check, but not a
+real-browser click-through. Treat this build as ready for your own
+hands-on testing rather than as fully self-certified the way v11.0–v11.2
+were for their own client-side pieces.
+
+## Part A — Reconnect Resilience
+
+The Grace Period was "time to manually Re-Join" in name only — manual
+recovery realistically takes minutes (refresh, land on the lobby, type
+both codes, maybe a Host-mediated round trip for the code itself), not
+the 30 seconds actually available. Fixed with a single continuous
+mechanism (`attemptReconnectOnce()`), used identically by both an
+automatic timer (every 2.5s) and a manual button, sharing one
+in-flight flag and each attempt bounded by its own 3.5s timeout
+(independent of any native browser connection timeout, since a
+silently-hanging attempt could otherwise block the shared flag far
+longer than the retry cadence intends).
+
+**Two real course-corrections happened while building this, kept here
+rather than only shipping the final answer:**
+1. The reconnect code never needed to be re-typed at all — a dropped
+   socket doesn't wipe the tab's own JS memory, only a full reload
+   does, so the tab can just reuse what it already has.
+2. An earlier draft staged automatic-then-manual as sequential phases.
+   Wrong: if background-tab throttling (a real, confirmed cause of
+   same-machine multi-tab test disconnects since 11.1) can silently
+   suppress an automatic-only phase, that's exactly the scenario a
+   manual click needs to still work in — and it reliably does, since
+   clicking a tab necessarily brings it into focus first. Both now run
+   for the entire Grace Period, never staged.
+
+**On the disconnected player's own screen**: a popup with a single
+countdown for the whole Grace Period, showing the actual accurate
+outcome the whole time (not a placeholder) — "You'll be folded" if
+facing a bet, or "You'll be checked through, but you can't reveal or
+claim the pot while disconnected" if free (confirmed directly against
+`revealHand()`: a simple, always-available voluntary action with no
+gating, so a player who reconnects even after the pot would otherwise
+have been claimed genuinely still has a chance). After expiry, the
+same button persists indefinitely, relabeled "Rejoin," no more
+countdown, message updated to reflect they're now Sitting Out.
+
+**Persistence**: the reconnect/table code pair is written to
+`sessionStorage` on every successful join/reconnect, and checked
+before anything else on page load — a same-tab reload recovers
+automatically, skipping the landing page entirely. The landing page's
+Re-Join form remains the correct fallback for a genuinely closed tab,
+a different device, or a stale cached pair — pre-filled from cache
+either way, never left blank just because the automatic attempt didn't
+pan out.
+
+**Rate-limiter correction**: `reconnectPlayer()` now returns
+`codeMatchedNoPlayer`, so the per-IP limiter only counts a code that
+matches nobody at all — a legitimate player's own correct code,
+rejected merely for timing (already reconnected, or the multi-device
+rule), no longer risks tripping the same limiter built to catch
+guessing.
+
+## Part B — Landing-page socket robustness
+
+Confirmed directly: the heartbeat loop pings every connected socket
+regardless of whether it's associated with a joined player yet, so a
+landing-page socket left idle for 20-30s (a realistic time to look up
+a code) was just as subject to the same ~10-12s detection/termination
+window as an in-table one — and the old `send()`'s silent readyState
+guard meant a click on that now-dead socket did visibly nothing at
+all. Fixed by making `send()` itself robust: a not-open socket now
+transparently reconnects, queues the message, and flushes it the
+instant the new connection opens, with a "Connecting…" state on
+whichever lobby button triggered it. One unified mechanism, not a
+separate background reconnect ticker — it also incidentally covers the
+rarer "clicked before the very first handshake finished" case for free.
+
+## Part C — Reconnect code alphabet
+
+`0` (zero) and `O` (letter O) removed from the 36-character alphabet
+(34 remain) — confirmed as a real, recurring problem during testing.
+Both removed together, not just one side, since a player who hasn't
+had the benefit of this conversation has no way to know which one was
+kept. `1`/`I` deliberately kept, per Mike's own judgment. Keyspace
+drops from 36^6 (~2.18 billion) to 34^6 (~1.54 billion) — negligible
+against the real threat model of a rate-limited human guesser.
+
+---
+
+## v11.2 — Table Owner Function Fixes, Host rename, and two smaller corrections
+
+Built from `the-cut-spec_v11-2.md`, consolidating
 everything found during 11.1 play-testing. `npm test` — **442 tests**
 (up from 435 in v11.1 — 7 new, all in `test/gameTable-11-2.test.js`).
 Live end-to-end verification run and passed (`live_test_11_2.js`,

@@ -1103,7 +1103,20 @@ function handleForceInactivityWarning(ws) {
 // app's real scale. Worst-case H.2 lag drops from up to 60s to up to
 // 5s; H.1 (already tolerant of 30-60 minute imprecision) is completely
 // unaffected by the tighter interval.
-const LIFECYCLE_SWEEP_INTERVAL_MS = 5 * 1000;
+// FIXED 11.5 (Part D): a permanent, genuine test-mode override -- NOT
+// another throwaway edit-and-revert hack against this file. The 11.4
+// live test claimed to set TEST_SWEEP_MS/TEST_INACTIVITY_SECONDS, but
+// those overrides only ever existed temporarily on a local copy of
+// this file during manual verification, then got reverted before
+// packaging -- the delivered test referenced environment variables
+// that didn't actually exist anywhere in the shipped server, so it
+// could never have exercised anything real. Wiring this in for real
+// this time: harmless in production (the env var is simply never set
+// there, so `Number(undefined) || fallback` always falls back to the
+// genuine 5000ms default), and lets a live test exercise the ACTUAL
+// shipped code path with a real, fast timescale rather than needing
+// its own separate hacked copy of the server.
+const LIFECYCLE_SWEEP_INTERVAL_MS = Number(process.env.TEST_SWEEP_MS) || 5 * 1000;
 // Part H.1: "30-60 minutes... not fully locked" -- 45 is the midpoint,
 // same "we won't know until we experience it" posture as every other
 // timer in this spec.

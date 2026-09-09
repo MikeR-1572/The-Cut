@@ -88,6 +88,19 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; }
 }
 
 .mono-input { font-family: var(--font-mono); letter-spacing: 0.08em; }
+/* NEW 11.5 (Part B): a dedicated class, deliberately separate from
+   .mono-input -- that class is also shared by numerous unrelated
+   numeric/select fields throughout the app (buy-in amounts, bet
+   amounts, card counts, TO allocation controls, etc.), so applying
+   text-transform there directly would be imprecise scoping that could
+   silently affect some future unrelated field sharing the same class.
+   Applied alongside .mono-input on exactly three fields: join-code,
+   rejoin-table-code, rejoin-code. Pure CSS, browser-native display
+   transform only -- the underlying typed value is unaffected (matching
+   is already case-insensitive), avoiding any cursor-position or
+   paste-handling risk a hand-rolled JS uppercase-as-you-type
+   implementation could introduce. */
+.code-input { text-transform: uppercase; }
 
 .checkbox-field {
   flex-direction: row;

@@ -216,9 +216,9 @@
     // NEW 11.1 (Fix 2): reusable app-styled confirm, replacing window.confirm()
     // NEW 11.3 (Part A.5): Connection Lost / Reconnect popup.
     reconnectDialog: document.getElementById('reconnect-dialog'),
+    reconnectDialogSubheading: document.getElementById('reconnect-dialog-subheading'), // NEW 11.5 (Part A.1)
     reconnectDialogMessage: document.getElementById('reconnect-dialog-message'),
     reconnectDialogCountdown: document.getElementById('reconnect-dialog-countdown'),
-    btnManualReconnect: document.getElementById('btn-manual-reconnect'),
 
     appConfirmDialog: document.getElementById('app-confirm-dialog'),
     appConfirmMessage: document.getElementById('app-confirm-message'),
@@ -667,6 +667,18 @@
    * point is a live countdown with nothing else necessarily occurring
    * in between ticks.
    */
+  /**
+   * CHANGED 11.5 (Part A): restructured per the spec's own four
+   * sub-parts. A.1: a second heading line, driven by the exact same
+   * reconnectExpired flag as everything else here. A.2: the
+   * Grace-Period-active message/countdown content is UNCHANGED --
+   * confirmed correct as-is via screenshot review, no merging. A.3:
+   * the post-expiry message is shortened -- the "you can still
+   * reconnect at any time" half is now redundant given A.1's new
+   * heading already says reconnection is ongoing. A.4: no more manual
+   * button/disabled-state logic at all -- automatic retry alone runs
+   * indefinitely, exactly as it already did.
+   */
   function renderReconnectDialog() {
     if (!state.reconnectFlowActive) return;
     const msRemaining = state.reconnectGraceDeadline - Date.now();
@@ -677,27 +689,22 @@
     }
 
     if (!state.reconnectExpired) {
+      el.reconnectDialogSubheading.textContent = 'Attempting Reconnection';
       const secondsLeft = Math.max(0, Math.ceil(msRemaining / 1000));
       el.reconnectDialogCountdown.textContent = `${secondsLeft}s remaining`;
       el.reconnectDialogMessage.textContent = state.reconnectWillFold
         ? "You'll be folded."
         : "You'll be checked through, but you can't reveal or claim the pot while disconnected.";
-      el.btnManualReconnect.textContent = state.reconnectAttemptInFlight ? 'Reconnecting\u2026' : 'Reconnect';
     } else {
+      el.reconnectDialogSubheading.textContent = 'Still Attempting Reconnection';
       el.reconnectDialogCountdown.textContent = '';
-      el.reconnectDialogMessage.textContent = "You've been moved to Sitting Out. You can still reconnect at any time.";
-      el.btnManualReconnect.textContent = state.reconnectAttemptInFlight ? 'Reconnecting\u2026' : 'Rejoin';
+      el.reconnectDialogMessage.textContent = "You've been moved to Sitting Out.";
     }
-    el.btnManualReconnect.disabled = state.reconnectAttemptInFlight;
   }
 
   // Never closable by Escape -- this reflects an unavoidable state, not
   // something to dismiss while the underlying problem persists.
   el.reconnectDialog.addEventListener('cancel', (event) => event.preventDefault());
-
-  el.btnManualReconnect.addEventListener('click', () => {
-    attemptReconnectOnce(state.gameTableCode, state.myReconnectCode);
-  });
 
   function handleServerMessage(msg) {
     switch (msg.type) {
@@ -1319,11 +1326,29 @@
   // NEW 9.0 (§6.11): confirmation-gated, same chip-dialog pattern as Kill
   // Hand -- given this is plausibly the single highest-stakes, most
   // irreversible click in the app.
-  el.btnAllIn.addEventListener('click', () => {
+  el.btnAllIn.addEventListener('click', async () => {
     hideTableError();
     const gameTable = state.lastGameTable;
     const me = gameTable?.players.find((p) => p.id === state.playerId);
     if (!me) return;
+    // NEW 11.5 (Part C): a generic (not hand-aware -- this app never
+    // judges hand strength, by design) warning shown only in a
+    // ReAnteable game, gating in front of the existing All-In dialog
+    // below rather than replacing or changing it. If 3+ players are
+    // already all-in and this hand doesn't reach a conclusion, a new
+    // hand can be dealt mid-cycle and a Player who committed everything
+    // here would have nothing left to cover its ante -- excluded from
+    // that deal per the existing dealing-eligibility rules. The app
+    // can't know whether THIS particular All-In is actually safe, so
+    // this leaves the judgment call to the Player rather than trying to
+    // be smart about it.
+    if (gameTable?.reAnteable) {
+      const proceed = await appConfirm(
+        "This is a re-ante game \u2014 if this hand doesn't reach a conclusion, a new hand may be dealt and you won't have enough chips to cover the new ante. You'll be excluded from that deal if it happens. Go All-In anyway?",
+        { confirmLabel: 'Go All-In', cancelLabel: 'Cancel' }
+      );
+      if (!proceed) return;
+    }
     el.allInDialogText.textContent = `Commit your entire remaining stack ($${me.chips}) to this hand. This cannot be undone.`;
     el.allInDialog.showModal();
   });

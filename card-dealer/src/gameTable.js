@@ -265,7 +265,12 @@ class GameTable {
     // posture as every other timer in this spec, but not a matter of
     // per-table taste the way the reconnect grace period is.
     this.lastActivityAt = Date.now();
-    this.inactivityTimeoutSeconds = 30 * 60;
+    // FIXED 11.5 (Part D): genuine, permanent test-mode override -- see
+    // server.js's own LIFECYCLE_SWEEP_INTERVAL_MS comment for why this
+    // is wired in for real this time rather than another temporary
+    // edit-and-revert. Harmless in production; the env var is never set
+    // there.
+    this.inactivityTimeoutSeconds = Number(process.env.TEST_INACTIVITY_SECONDS) || 30 * 60;
   }
 
   /**

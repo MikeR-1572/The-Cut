@@ -58,7 +58,7 @@
           <p class="hint">Ask whoever opened the table for their code.</p>
           <label class="field">
             <span>Table code</span>
-            <input type="text" id="join-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+            <input type="text" id="join-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input code-input" />
           </label>
           <label class="field">
             <span>Your name</span>
@@ -80,11 +80,11 @@
                the click handler, validation) depends on visual order. -->
           <label class="field">
             <span>Table code</span>
-            <input type="text" id="rejoin-table-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+            <input type="text" id="rejoin-table-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input code-input" />
           </label>
           <label class="field">
             <span>Reconnect code</span>
-            <input type="text" id="rejoin-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input" />
+            <input type="text" id="rejoin-code" maxlength="6" placeholder="XXXXXX" autocomplete="off" class="mono-input code-input" />
           </label>
           <button class="btn btn-secondary" id="btn-rejoin-game-table" title="Reconnect using your code">Re-Join</button>
         </div>
@@ -682,21 +682,30 @@
       </div>
     </dialog>
 
-    <!-- ---- Connection Lost / Reconnect popup (NEW 11.3, Part A.5):
-         a single continuous phase per A.3's own correction -- automatic
-         retry and this manual button both run for the entire Grace
-         Period, never staged sequentially. No close affordance: this
-         reflects an unavoidable state, not something to dismiss while
-         the underlying problem persists -- see the 'cancel' listener in
+    <!-- ---- Connection Lost / Reconnect popup (NEW 11.3, Part A.5;
+         restructured 11.5, Part A): purely informational -- automatic
+         retry alone runs indefinitely (Part A.4 of the-cut-spec_v11-5.md:
+         the manual button was removed entirely after live testing
+         confirmed it visibly flickered enabled/disabled roughly every
+         1.5s indefinitely on a genuinely dead connection, an invitation
+         to click that accomplished nothing the ticker wasn't already
+         about to do on its own). No close affordance: this reflects an
+         unavoidable state, not something to dismiss while the
+         underlying problem persists -- see the 'cancel' listener in
          client.js that blocks Escape from closing it. See
          renderReconnectDialog() in client.js. ---- -->
     <dialog id="reconnect-dialog" class="chip-dialog">
       <h3>Connection Lost</h3>
+      <!-- NEW 11.5 (Part A.1): second heading line, same style as the
+           first (reuses .chip-dialog h3 as-is, no new CSS tier).
+           Text swaps between "Attempting Reconnection" (Grace Period
+           active) and "Still Attempting Reconnection" (post-expiry) --
+           literally true either way, since automatic retry is only
+           ever stopped by an actual successful reconnect, never by
+           Grace Period expiry itself. -->
+      <h3 id="reconnect-dialog-subheading">Attempting Reconnection</h3>
       <p class="dialog-hint" id="reconnect-dialog-message">Trying to reconnect&hellip;</p>
       <p class="dialog-hint" id="reconnect-dialog-countdown"></p>
-      <div class="dialog-actions">
-        <button type="button" class="btn btn-primary" id="btn-manual-reconnect">Reconnect</button>
-      </div>
     </dialog>
 
     <!-- ---- Reusable app-styled confirmation dialog (NEW 11.1, Fix 2):

@@ -1,7 +1,96 @@
-# The Cut — Card Dealing & Betting Engine (v11.4)
+# The Cut — Card Dealing & Betting Engine (v11.5)
 
-**Client Heartbeat, Badge Ticker, Field Order, Uncallable-Bet Gating**
-— built from `the-cut-spec_v11-4.md`, consolidating findings from
+**Reconnect Dialog Restructure, Code Input Casing, ReAnteable All-In
+Warning** — built from `the-cut-spec_v11-5.md`, consolidating a full
+round of 11.4 play-testing findings. `npm test` — **449 tests**
+(unchanged from v11.4 — this release is almost entirely client-side
+UI plus a test-infrastructure fix; no new GameTable-level behavior to
+unit-test). Live end-to-end verification run and passed, including a
+proper adversarial re-check of Part D's own fix, plus a re-run of
+`live_test_11_0.js` through `live_test_11_4.js` to confirm nothing
+regressed.
+
+## Part A — Reconnect dialog restructure
+
+Confirmed against actual screenshots during this round. Four changes,
+all to the popup from `the-cut-spec_v11-3.md` Part A.5:
+- A second `<h3>` heading line, reusing `.chip-dialog h3` as-is (no new
+  CSS tier): "Attempting Reconnection" during the Grace Period,
+  "Still Attempting Reconnection" after expiry — literally true either
+  way, since automatic retry is only ever stopped by an actual
+  successful reconnect, never by expiry itself.
+- The Grace-Period-active message/countdown content is unchanged,
+  confirmed correct as-is via screenshot review.
+- The post-expiry message shortened to just "You've been moved to
+  Sitting Out." — the "you can still reconnect at any time" half is
+  now redundant given the new heading.
+- **The manual Reconnect/Rejoin button removed entirely, both states.**
+  Root cause of a real, confirmed UX problem: with automatic retry
+  running every 2.5s and each attempt needing its own 3.5s timeout to
+  fail before the button re-enables, a genuinely dead connection
+  produced a button visibly flickering enabled/disabled roughly every
+  1.5s indefinitely — an invitation to click that accomplished nothing
+  the ticker wasn't already about to do moments later. The dialog is
+  now purely informational; automatic retry alone continues
+  indefinitely, exactly as it already did.
+
+## Part B — Force uppercase on landing-page code inputs
+
+A new, dedicated `.code-input` class (`text-transform: uppercase`),
+applied alongside the existing `.mono-input` on exactly three fields —
+`join-code`, `rejoin-table-code`, `rejoin-code` — deliberately
+separate from `.mono-input` itself, which is also shared by numerous
+unrelated numeric/select fields throughout the app and would have been
+imprecise scoping for this. Pure CSS, browser-native — the underlying
+typed value (already case-insensitive on the server) is unaffected;
+only the display changes, avoiding any cursor-position or
+paste-handling risk a hand-rolled JS implementation could introduce.
+
+## Part C — Confirmation before All-In in a ReAnteable game
+
+Found via a rich multi-layered testing scenario (3 of 4 players
+all-in, nobody able to open, New Hand blocked entirely). The real
+underlying fix (deal-eligibility filter changes, a new degenerate-case
+pot resolution) is explicitly deferred past Beta per Mike's own call —
+revisited after, not abandoned. What ships instead: a generic warning,
+not a smart one — this app never judges hand strength anywhere, by
+design, so it can't know whether a given All-In is actually safe.
+Shown only in a ReAnteable game, using the existing `appConfirm()`
+component (no new dialog type), layered in *front of* the app's own
+pre-existing All-In confirmation dialog rather than replacing it —
+players in a ReAnteable game now see the ReAnteable-specific warning
+first, then the existing "commit your stack" confirmation, unchanged.
+Purely a client-side gate; no betting or dealing logic touched at all.
+
+## Part D — `live_test_11_4.js` fixed, and properly this time
+
+Confirmed exactly the two defects flagged: `console.assert()` never
+fails the Node.js process on a failed assertion (proven by deliberately
+breaking the real Part-H.2 exclusion under test and getting
+byte-for-byte identical "passed" output and exit code 0), and the test
+assumed `TEST_SWEEP_MS`/`TEST_INACTIVITY_SECONDS` environment-variable
+overrides that only ever existed on a temporary, locally-reverted copy
+of `server.js`/`gameTable.js` during v11.4's own manual verification —
+never in the actually-shipped code.
+
+**Fixed properly, not with another throwaway hack**: both overrides
+are now genuinely, permanently wired into the real source
+(`server.js`'s `LIFECYCLE_SWEEP_INTERVAL_MS`, `gameTable.js`'s
+`inactivityTimeoutSeconds`) — harmless in production, since the
+env vars are simply never set there. The test itself now uses real
+`assert()` calls, with spawned-server cleanup moved into a `finally`
+block after discovering a failed assertion left the child process
+running, masking the correct nonzero exit code behind an external
+timeout. Re-ran the exact adversarial check that caught this in the
+first place — deliberately broke the real exclusion again, confirmed
+the fixed test now genuinely fails with exit code 1, then confirmed it
+passes cleanly again once reverted.
+
+---
+
+## v11.4 — Client Heartbeat, Badge Ticker, Field Order, Uncallable-Bet Gating
+
+Built from `the-cut-spec_v11-4.md`, consolidating findings from
 extended 11.3 play-testing. `npm test` — **449 tests** (up from 444 in
 v11.3 — 5 new, in `test/gameTable-11-4.test.js`). Live end-to-end
 verification run and passed (`live_test_11_4.js`), plus a re-run of

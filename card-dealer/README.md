@@ -1,16 +1,109 @@
-# The Cut — Card Dealing & Betting Engine (v11.5)
+# The Cut — Card Dealing & Betting Engine (v12.0)
 
-**Reconnect Dialog Restructure, Code Input Casing, ReAnteable All-In
-Warning** — built from `the-cut-spec_v11-5.md`, consolidating a full
-round of 11.4 play-testing findings. `npm test` — **449 tests**
-(unchanged from v11.4 — this release is almost entirely client-side
-UI plus a test-infrastructure fix; no new GameTable-level behavior to
+**Player Rail Reorder, Betting Rail Restructure, Card Legibility, Game
+Catalog Copy** — built from `the-cut-spec_v12-0.md`. **Deliberately
+cosmetic-only, low-risk**: no betting, dealing, or reconnect logic
+touched anywhere in this release, so it can go to beta testers
+alongside the still-unvalidated 11.x functional work without adding
+any new functional risk. `npm test` — **448 tests** (unchanged from
+v11.5 — every item in this release is a pure markup/CSS/rendering
+change; nothing new at the `GameTable` level to unit-test).
+
+**Part F (game-choices.json `displayName`/`description` refresh) is
+included in this build** — `Game_Names_&_Titles.pdf` arrived after
+Parts A–E were already built and tested; folded in as a follow-up
+rather than redoing the whole release. `npm test` — **448 tests**
+(unchanged from v11.5 — every item in this release is a pure
+markup/CSS/rendering/static-content change; nothing new at the
+`GameTable` level to unit-test).
+
+### Part A — "Your reconnect code" moved below About
+
+The `<p id="own-reconnect-code-readout">` line (added 11.0 Part D,
+previously sitting directly beneath the "Your rail" heading, above
+the chip total) now sits below the About button, still inside the
+ordinary-player section of the rail, above the Host-only divider.
+Markup position only — same element id, same class (`.hint-small`,
+confirmed no positional CSS dependency), same JS
+(`renderPlayerRail()` in `client.js` sets `.textContent` on the same
+node regardless of where it sits in the DOM) — so nothing else about
+its behavior changes.
+
+### Part B — Betting rail reorder: Bet/Raise To button to the far left
+
+`#btn-place-bet` now precedes `#bet-amount` in markup order (plain
+flexbox, no `order` property anywhere to fight — DOM order alone
+produces the visual reorder). The separate `.raise-limits-hint` span
+is removed entirely, markup and CSS both; the same legal min/max
+range is now written directly into `#bet-amount`'s own `placeholder`
+in `renderBettingRail()`, falling back to the plain "Amount"
+placeholder for Fixed-Limit (still no free-text box at all) and
+whenever Bet/Raise itself is currently unusable.
+
+### Part C — Shared betting-rail line: bold lead figure, two formats
+
+`renderBettingRail()`'s shared status line rebuilt from a single flat
+`textContent` join into DOM nodes (`createElement('strong')` +
+`createTextNode()`), so the figure that matters to the *viewer* leads
+in bold with everything else demoted to a lower-case parenthetical
+aside — "**$Y TO YOU** (current bet: $Z)" when facing a bet or it's
+the viewer's own turn (also the fallback when there's no other player
+to name), "**$X To [Player]** $Y to you (current bet: $Z)" otherwise.
+Stud's Bring-In state still swaps the parenthetical's label — "(bring
+in: $Z)" now, lower-cased to match the new house style, same value
+either way. Player names go through `textContent`, not string
+concatenation, so this carries no injection risk.
+
+### Part D — Card sizing: 25% taller, aspect ratio preserved
+
+All three card-size contexts scaled by the same 1.25× factor on both
+dimensions: `.card`/`.card-back` (community cards, opponents'
+face-down cards, muck/burn piles) 38×54px → 48×68px; the viewer's own
+hand (`.seat.is-you .card`) 48×68px → 60×85px; Rabbit Hunt reveal
+cards 30×43px → 38×54px. Margins/overlap left at their existing
+values. Card-index and suit-glyph font sizes deliberately **not**
+scaled to match, per the spec.
+
+### Part E — Game description text matched to "Dealer's rail" heading
+
+`.game-rail-description`: `font-size: 0.8rem` (browser-default weight)
+→ `font-size: 0.95rem; font-weight: 600`, matching `.dealer-rail h2`/
+`.player-rail h2` exactly on those two properties. Italic style and
+typeface (still the body sans-serif, not the display serif the
+heading itself uses) deliberately left unchanged, per the spec.
+
+### Part F — Game catalog copy: `displayName`/`description` refresh
+
+All 16 `game-choices.json` entries updated from `Game_Names_&_Titles.pdf`
+(9/9/26). Confirmed directly, not just written: every `id`, `profile`,
+`hiddenOptions`, and `dealerOptions` value byte-identical to v11.5's
+JSON, field by field, across all 16 entries — only `displayName`/
+`description` changed. Dash characters normalized to the file's own
+pre-existing house style rather than copied verbatim from the source
+(which used a single dash character throughout): em dash "—" as the
+`displayName` separator, en dash "–" inside every `description`,
+matching what every pre-12.0 entry already did. Transcription fixes
+made per the spec: "5–Card Stud"/"7–Card Stud" → "5-Card Stud"/
+"7-Card Stud" (stray en dash inside the word itself); "7-Card Sud" →
+"7-Card Stud" (typo); "Omaha/8-" → "Omaha/8 –" (missing space); "Hi/lo"
+→ "Hi/Lo" (capitalization, matching every other entry in the file).
+The "(7CS)" suffix on all seven Stud variants carried over exactly as
+given, per the spec's own instruction not to alter it.
+
+---
+
+## v11.5 — Reconnect Dialog Restructure, Code Input Casing, ReAnteable All-In Warning
+
+Built from `the-cut-spec_v11-5.md`, consolidating a full round of
+11.4 play-testing findings. `npm test` — **449 tests** (unchanged
+from v11.4 — this release is almost entirely client-side UI plus a
+test-infrastructure fix; no new GameTable-level behavior to
 unit-test). Live end-to-end verification run and passed, including a
 proper adversarial re-check of Part D's own fix, plus a re-run of
 `live_test_11_0.js` through `live_test_11_4.js` to confirm nothing
 regressed.
 
-## Part A — Reconnect dialog restructure
+### Part A — Reconnect dialog restructure
 
 Confirmed against actual screenshots during this round. Four changes,
 all to the popup from `the-cut-spec_v11-3.md` Part A.5:
@@ -34,7 +127,7 @@ all to the popup from `the-cut-spec_v11-3.md` Part A.5:
   now purely informational; automatic retry alone continues
   indefinitely, exactly as it already did.
 
-## Part B — Force uppercase on landing-page code inputs
+### Part B — Force uppercase on landing-page code inputs
 
 A new, dedicated `.code-input` class (`text-transform: uppercase`),
 applied alongside the existing `.mono-input` on exactly three fields —
@@ -46,7 +139,7 @@ typed value (already case-insensitive on the server) is unaffected;
 only the display changes, avoiding any cursor-position or
 paste-handling risk a hand-rolled JS implementation could introduce.
 
-## Part C — Confirmation before All-In in a ReAnteable game
+### Part C — Confirmation before All-In in a ReAnteable game
 
 Found via a rich multi-layered testing scenario (3 of 4 players
 all-in, nobody able to open, New Hand blocked entirely). The real
@@ -62,7 +155,7 @@ players in a ReAnteable game now see the ReAnteable-specific warning
 first, then the existing "commit your stack" confirmation, unchanged.
 Purely a client-side gate; no betting or dealing logic touched at all.
 
-## Part D — `live_test_11_4.js` fixed, and properly this time
+### Part D — `live_test_11_4.js` fixed, and properly this time
 
 Confirmed exactly the two defects flagged: `console.assert()` never
 fails the Node.js process on a failed assertion (proven by deliberately

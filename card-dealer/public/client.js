@@ -280,7 +280,8 @@
     personalFoldAction: document.getElementById('personal-fold-action'),
     btnFold: document.getElementById('btn-fold'),
     btnAllIn: document.getElementById('btn-all-in'), // NEW 9.0 (§6.11)
-    raiseLimitsHint: document.getElementById('raise-limits-hint'), // NEW 9.0 (§6.10)
+    // CHANGED 12.0 (Part B): raiseLimitsHint removed -- range now lives
+    // in #bet-amount's own placeholder (see renderBettingRail()).
     allInDialog: document.getElementById('all-in-dialog'),
     allInDialogText: document.getElementById('all-in-dialog-text'),
     btnAllInCancel: document.getElementById('btn-all-in-cancel'),
@@ -2942,25 +2943,45 @@
 
     if (gameTable.bettingOpen) {
       const turnPlayer = gameTable.players.find((p) => p.id === gameTable.currentTurnPlayerId);
-      // CHANGED 7.1 (§6.8): reads "Bring In" instead of "Total Bet" while
-      // Stud's Bring-In obligation is still unresolved -- "Total Bet"
-      // implies money someone actually placed, but nobody's paid the
-      // Bring In yet at this exact moment, only been forced to face it.
-      // Reverts to "Total Bet" the instant the selected opening bettor
-      // calls or raises over it (bringInObligationId clears), same
-      // number either way -- the "$YY to You"/"$ZZ to [Name]" figures
-      // below are unaffected, since those were already accurate.
-      const totalBetLabel = gameTable.profile === 'stud' && gameTable.bringInObligationId ? 'Bring In' : 'Total Bet';
-      const parts = [`${totalBetLabel}: $${gameTable.currentBetToCall}`];
-      if (me) {
-        const toYou = Math.max(0, gameTable.currentBetToCall - me.currentBet);
-        parts.push(`$${toYou} to You`);
-      }
-      if (turnPlayer && turnPlayer.id !== state.playerId) {
+      // CHANGED 12.0 (Part C): the shared line is restyled so the figure
+      // that matters to the *viewer* leads, bold, with everything else
+      // demoted to a lower-case parenthetical aside -- replaces the old
+      // flat "Total Bet: $Z · $Y to You · $X to [Name]" line built via a
+      // single textContent assignment. Built as DOM nodes now
+      // (createElement('strong') + createTextNode) so the lead figure
+      // can be genuinely bold without a new CSS class; player names go
+      // through textContent, not string concatenation into markup, so
+      // this carries no injection risk despite user-entered names.
+      //
+      // Two formats, chosen per-viewer, per render:
+      //   1. Facing a bet, or it's genuinely the viewer's own turn to
+      //      act (including a $0 check), or there's no other player to
+      //      name at all: "$Y TO YOU (current bet: $Z)".
+      //   2. Not facing a bet, and it's someone else's turn: "$X To
+      //      [Player] $Y to you (current bet: $Z)", with the second
+      //      figure and the parenthetical both demoted to a lower-case,
+      //      unbolded aside.
+      //
+      // Stud's unresolved Bring-In obligation still swaps the
+      // parenthetical's label ("bring in" instead of "current bet"),
+      // now lower-cased to match this line's new house style -- same
+      // underlying value either way, no other change.
+      const bringInActive = gameTable.profile === 'stud' && gameTable.bringInObligationId;
+      const asideLabel = bringInActive ? 'bring in' : 'current bet';
+      const toYou = me ? Math.max(0, gameTable.currentBetToCall - me.currentBet) : 0;
+      const isMyTurn = !!turnPlayer && turnPlayer.id === state.playerId;
+      const useFormat1 = toYou > 0 || isMyTurn || !turnPlayer;
+
+      el.bettingRailShared.textContent = '';
+      const lead = document.createElement('strong');
+      if (useFormat1) {
+        lead.textContent = `$${toYou} TO YOU`;
+        el.bettingRailShared.append(lead, document.createTextNode(` (${asideLabel}: $${gameTable.currentBetToCall})`));
+      } else {
         const toThem = Math.max(0, gameTable.currentBetToCall - turnPlayer.currentBet);
-        parts.push(`$${toThem} to ${turnPlayer.name}`);
+        lead.textContent = `$${toThem} To ${turnPlayer.name}`;
+        el.bettingRailShared.append(lead, document.createTextNode(` $${toYou} to you (${asideLabel}: $${gameTable.currentBetToCall})`));
       }
-      el.bettingRailShared.textContent = parts.join(' \u00b7 ');
 
       // NEW 9.2 (§6.10), extended to Stud/Draw in 9.4: persistent
       // table-wide indicator, not a fading toast -- "raise cap reached"
@@ -3234,25 +3255,23 @@
         el.btnAllIn.title = 'No player can cover any additional bets. You must Check to continue.';
       }
 
-      // NEW 9.0 (§6.10): "the betting UI should compute and display the
-      // current legal minimum and maximum raise as live numbers whenever
-      // it's the acting player's turn and raising is possible" -- the
-      // spec's own UI-surfacing note. Hidden once Bet/Raise itself is
-      // unusable since there's no legal range left to show.
-      // CHANGED 9.2: Fixed-Limit's own amount now lives directly in the
-      // button label (above) -- repeating it here would be redundant, so
-      // this hint is now No-Limit/Pot-Limit only, where a genuine range
-      // (not one deterministic number) actually needs surfacing.
+      // CHANGED 12.0 (Part B): the legal min/max range previously shown
+      // in its own element (#raise-limits-hint) is now folded directly
+      // into #bet-amount's own placeholder text. Same condition as
+      // before (No-Limit/Pot-Limit only, where a genuine range -- not
+      // one deterministic number -- actually needs surfacing); Fixed-
+      // Limit and the unusable-bet case both fall back to the plain
+      // "Amount" placeholder, matching what the field always showed
+      // before a genuine range existed to display.
       if (isPhaseGatedProfile && !betUnusable && !isFixedLimit) {
-        el.raiseLimitsHint.hidden = false;
-        el.raiseLimitsHint.textContent = `Legal: $${minLegalTotal}\u2013$${maxLegalTotal}`;
+        el.betAmount.placeholder = `$${minLegalTotal}\u2013$${maxLegalTotal}`;
       } else {
-        el.raiseLimitsHint.hidden = true;
+        el.betAmount.placeholder = 'Amount';
       }
     } else {
       el.btnAllIn.hidden = true;
-      el.raiseLimitsHint.hidden = true;
       el.betAmount.hidden = false; // reset for the next turn-actions render
+      el.betAmount.placeholder = 'Amount'; // CHANGED 12.0 (Part B)
     }
 
     // BUG FIX 5.2 (§5.8/§6.4): Fold has its own visibility, entirely

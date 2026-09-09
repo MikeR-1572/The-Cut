@@ -153,9 +153,6 @@
         <button class="player-rail-toggle has-hint" id="btn-player-rail-toggle" type="button" title="Collapse/expand your rail" aria-expanded="true">&#8249;</button>
         <div class="player-rail-content" id="player-rail-content">
           <h2>Your rail</h2>
-          <!-- NEW 11.0 (Part D): shown so a player has their own code
-               without needing to ask the Table Owner for it. -->
-          <p class="hint-small" id="own-reconnect-code-readout"></p>
           <div class="rail-group own-chip-readout" id="own-chip-readout"></div>
           <div class="rail-group">
             <button class="btn btn-secondary" id="btn-sit-toggle" type="button" title="Sit out or back in">Sit Out</button>
@@ -173,6 +170,12 @@
           <div class="rail-group rail-row rail-row--secondary">
             <button class="btn btn-secondary btn-small" id="btn-open-about-dialog" type="button" title="About this app">About</button>
           </div>
+          <!-- MOVED 12.0 (the-cut-spec_v12-0.md): was directly beneath
+               the "Your rail" heading (NEW 11.0, Part D); relocated below
+               About per Mike's request. Same element/id, same JS-driven
+               content (renderPlayerRail() in client.js) -- markup
+               position only, no behavior change. -->
+          <p class="hint-small" id="own-reconnect-code-readout"></p>
           <!-- FIXED (11.0 review finding #2): visual separation + label
                between ordinary player controls and Table-Owner-exclusive
                ones, per Mike's explicit request. Reuses the existing
@@ -313,13 +316,14 @@
       <div class="raise-cap-indicator" id="raise-cap-indicator" hidden></div>
       <div class="betting-rail-personal">
         <div class="personal-turn-actions" id="personal-turn-actions" hidden>
-          <input type="number" id="bet-amount" class="mono-input" min="1" placeholder="Amount" title="Bet: the opening amount. Raise To: the new total you're raising to." />
-          <!-- NEW 9.0 (§6.10): "the betting UI should compute and display
-               the current legal minimum and maximum raise as live
-               numbers whenever it's the acting player's turn and raising
-               is possible" -- Hold'em only, hidden otherwise. -->
-          <span class="raise-limits-hint" id="raise-limits-hint" hidden></span>
+          <!-- CHANGED 12.0 (the-cut-spec_v12-0.md Part B): Bet/Raise-To
+               button moved to precede the Amount field (was the
+               reverse). The legal min/max range previously shown here
+               as its own element (#raise-limits-hint) is now written
+               directly into #bet-amount's own placeholder by
+               renderBettingRail() -- see client.js. -->
           <button class="btn btn-primary" id="btn-place-bet" type="button" title="Bet or raise by the entered amount">Bet</button>
+          <input type="number" id="bet-amount" class="mono-input" min="1" placeholder="Amount" title="Bet: the opening amount. Raise To: the new total you're raising to." />
           <button class="btn btn-secondary" id="btn-call" type="button" title="Match the current bet to call">Call</button>
           <button class="btn btn-secondary" id="btn-check" type="button" title="Pass without betting">Check</button>
           <!-- NEW 9.0 (§6.11): Hold'em only, hidden for every other

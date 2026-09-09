@@ -168,14 +168,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
 .btn-allin:hover:not(:disabled) { filter: brightness(1.12); }
 .btn-allin:disabled { opacity: 0.45; }
 
-/* NEW 9.0 (§6.10): live legal min/max raise readout, next to the bet
-   input -- small and unobtrusive, informational rather than a control. */
-.raise-limits-hint {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--ivory-dim);
-  align-self: center;
-}
+/* REMOVED 12.0 (Part B): .raise-limits-hint deleted along with its
+   markup -- the legal min/max range now lives in #bet-amount's own
+   placeholder instead of a separate element. */
 
 /* NEW 8.2 (§6.9): Kill Hand's bottom-of-rail placement -- ~2 blank
    lines' worth of vertical spacing above it, isolating it from every
@@ -353,7 +348,12 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
 }
 .game-rail-description {
   color: var(--brass-bright);
-  font-size: 0.8rem;
+  /* CHANGED 12.0 (Part E): size/weight matched to
+     .dealer-rail h2/.player-rail h2 (0.8rem, no explicit weight ->
+     0.95rem, 600). Italic and typeface (still --font-body, not
+     --font-display) deliberately left unchanged -- not requested. */
+  font-size: 0.95rem;
+  font-weight: 600;
   font-style: italic;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -946,15 +946,20 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   z-index: 2;
 }
 .rabbit-hunt-cards:empty { display: none; }
-.rabbit-hunt-cards .card { width: 30px; height: 43px; margin-left: -14px; }
+/* CHANGED 12.0 (Part D): 25% taller, width scaled proportionally to
+   hold the existing aspect ratio (30x43 -> 38x54). Margin/overlap left
+   unchanged -- cards now overlap proportionally less. */
+.rabbit-hunt-cards .card { width: 38px; height: 54px; margin-left: -14px; }
 .rabbit-hunt-cards .card:first-child { margin-left: 0; }
 
 /* playing card, drawn entirely in CSS -- no external art assets */
 .card,
 .card-back {
   --tilt: 0deg;
-  width: 38px;
-  height: 54px;
+  /* CHANGED 12.0 (Part D): 25% taller, width scaled proportionally
+     (38x54 -> 48x68). Margin/overlap left at its existing value. */
+  width: 48px;
+  height: 68px;
   margin-left: -18px;
   border-radius: 5px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
@@ -1069,7 +1074,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
 }
 
 /* the viewer's own seat gets slightly larger, easier-to-read cards */
-.seat.is-you .card { width: 48px; height: 68px; margin-left: -20px; }
+/* CHANGED 12.0 (Part D): 25% taller, width scaled proportionally
+   (48x68 -> 60x85). Margin/overlap left at its existing value. */
+.seat.is-you .card { width: 60px; height: 85px; margin-left: -20px; }
 .seat.is-you .card-index { font-size: 0.96rem; }
 .seat.is-you .card-suit-glyph { font-size: 1.73rem; }
 .seat.is-you .seat-name { max-width: 130px; }

@@ -23,6 +23,13 @@
       </div>
     </header>
 
+    <!-- MOVED 12.1 (Part E): was after .lobby-grid (bottom of page,
+         below the login cards) -- relocated above it, between the "The
+         Cut" header and the three login cards. Same id/class, no JS
+         reference changed (el.lobbyError in client.js still targets
+         this same element regardless of DOM position). -->
+    <p class="lobby-error" id="lobby-error" role="alert" hidden></p>
+
     <section class="lobby-grid">
       <div class="lobby-card">
         <h2>Open a table</h2>
@@ -90,8 +97,6 @@
         </div>
       </div>
     </section>
-
-    <p class="lobby-error" id="lobby-error" role="alert" hidden></p>
   </main>
 
   <!-- ============== TABLE ============== -->

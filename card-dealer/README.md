@@ -1,23 +1,88 @@
-# The Cut — Card Dealing & Betting Engine (v12.0)
+# The Cut — Card Dealing & Betting Engine (v12.1)
 
-**Player Rail Reorder, Betting Rail Restructure, Card Legibility, Game
-Catalog Copy** — built from `the-cut-spec_v12-0.md`. **Deliberately
-cosmetic-only, low-risk**: no betting, dealing, or reconnect logic
-touched anywhere in this release, so it can go to beta testers
-alongside the still-unvalidated 11.x functional work without adding
-any new functional risk. `npm test` — **448 tests** (unchanged from
-v11.5 — every item in this release is a pure markup/CSS/rendering
-change; nothing new at the `GameTable` level to unit-test).
+**12.0 Play-Testing Follow-Ups** — built from `the-cut-spec_v12-1.md`,
+consolidating everything found during 12.0 play-testing. Still
+cosmetic-only/low-risk — no betting, dealing, or reconnect logic
+touched, same as 12.0 itself. `npm test` — **448 tests** (unchanged —
+every item in this release is a pure markup/CSS/rendering/
+static-content change; nothing new at the `GameTable` level to
+unit-test).
 
-**Part F (game-choices.json `displayName`/`description` refresh) is
-included in this build** — `Game_Names_&_Titles.pdf` arrived after
-Parts A–E were already built and tested; folded in as a follow-up
-rather than redoing the whole release. `npm test` — **448 tests**
-(unchanged from v11.5 — every item in this release is a pure
-markup/CSS/rendering/static-content change; nothing new at the
-`GameTable` level to unit-test).
+### Part A — Shared betting line: real bug fix in Format 1/Format 2 selection
 
-### Part A — "Your reconnect code" moved below About
+`useFormat1` previously included `toYou > 0`, so *any* viewer with an
+outstanding amount got Format 1 regardless of whose turn it actually
+was — `currentBetToCall` is seeded the moment a betting round opens,
+so every player who hasn't yet matched it computed `toYou > 0`,
+including someone who wouldn't actually face that decision until the
+turn came back around to them. Confirmed via two independent live
+reports (an ordinary bet, and Stud's Bring-In). Fixed to `isMyTurn ||
+!turnPlayer` — format selection now depends purely on whose turn it
+is.
+
+### Part B — Format 2 restyled: "/" separators, Title Case, no parens
+
+Format 2 ("not facing a bet") rebuilt from a lower-case parenthetical
+aside to three explicit, slash-separated, Title Case segments: "**$X
+To Player [Name]** / $Y To You / Current Bet: $Z". Same DOM-node
+construction as before (`createElement('strong')` for the lead figure,
+`createTextNode()` for the rest); only the text content changed. Stud's
+Bring-In label swap preserved, now reading "Bring In: $Z" in Title
+Case to match. Format 1 unchanged by this Part — still "**$Y TO YOU**
+(current bet: $Z)", parenthetical, no slashes.
+
+### Part C — Betting rail now paints in front of the cards
+
+Root cause confirmed: a stacking-order defect, not an opacity issue —
+the rail's translucent background was already correct. Every seat,
+community card, and pot display is `position: absolute` with an
+explicit `z-index: 2`; `.betting-rail` had no `position`/`z-index` of
+its own, so despite sitting later in the markup it still painted
+*before* the table's card elements (a card's tilted corner, paint-only,
+could visually extend into the rail's space). Fixed with
+`position: relative; z-index: 4` — above every existing `z-index: 2`
+use, below the one `z-index: 5` (a card's own hover-lift, deliberately
+left alone).
+
+### Part D — Viewer's own hand nudged up, clear of the viewport edge
+
+A long-standing issue tipped from marginal to clearly visible by
+12.0's own +17px card-height increase — `.view-gametabletop`'s fixed
+`100vh`/`overflow: hidden` plus the viewer's own seat sitting right at
+the shared ellipse's bottom rim meant the taller card fan clipped off
+the bottom of the window. Fixed by layering a `translateY(-28px)` onto
+`.seat.is-you`'s own transform, rather than touching `seatPosition()`'s
+shared ellipse math (which would move the viewer's own name badge off
+the rim every other seat sits on). **Caveat, stated plainly**: 28px is
+a starting estimate, not yet verified live across every window size —
+may need further tuning, particularly on smaller viewports.
+
+### Part E — Landing page: login error message moved above the cards
+
+`#lobby-error` relocated in `index.html` from after `.lobby-grid`
+(bottom of the page) to before it, between "The Cut" header and the
+three login cards. Pure markup + spacing change — no id, class, or JS
+reference changed. `.lobby-error`'s own spacing flipped from
+`margin-top: 18px` to `margin-bottom: 18px` to match its new position.
+
+### Part F — `game-choices.json`: Mike's own hand-edited copy, verbatim
+
+The 12.0 catalog-copy transcription (from `Game_Names_&_Titles.pdf`)
+didn't match what Mike actually wanted — not a transcription-fidelity
+issue, a mismatch between the source PDF and his actual intent.
+Replaced with Mike's own hand-edited file, applied **verbatim** — no
+dash-character normalization, no capitalization changes, nothing
+carried over from 12.0's own house-style choices. Confirmed
+field-by-field: every `id`, `profile`, `hiddenOptions`, and
+`dealerOptions` value byte-identical to the prior (12.0) file; only
+`displayName`/`description` changed, across all 16 entries. The one
+flagged typo (`stud-7card-low-chicago`'s doubled closing parenthesis)
+was already corrected in the file as delivered — confirmed, no further
+edit needed.
+
+---
+
+## v12.0 — Player Rail Reorder, Betting Rail Restructure, Card Legibility, Game Catalog Copy
 
 The `<p id="own-reconnect-code-readout">` line (added 11.0 Part D,
 previously sitting directly beneath the "Your rail" heading, above

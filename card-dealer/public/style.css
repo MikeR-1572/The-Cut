@@ -269,7 +269,11 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
 }
 
 .lobby-error {
-  margin-top: 18px;
+  /* CHANGED 12.1 (Part E): flipped from margin-top (spacing it below
+     the grid, its old position) to margin-bottom (spacing it above the
+     grid, its new one) -- matches the element's relocation in
+     index.html from after .lobby-grid to before it. */
+  margin-bottom: 18px;
   padding: 12px 16px;
   background: var(--danger-bg);
   color: var(--danger-text);
@@ -692,6 +696,22 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   box-shadow: 0 0 0 1px var(--brass-bright), 0 0 14px rgba(232, 201, 126, 0.35);
 }
 .seat.is-you .seat-info { background: rgba(0, 0, 0, 0.48); }
+/* NEW 12.1 (Part D): the viewer's own hand nudged up to clear the
+   fixed 100vh viewport's bottom edge. Long-standing, but 12.0's own
+   card-size increase (+17px height) tipped it from marginal to
+   clearly visible. seatPosition()'s shared ellipse math is
+   deliberately left untouched -- moving it would shift the viewer's
+   own name badge off the rim every other seat sits on, breaking
+   visual consistency -- so the nudge is layered onto .seat.is-you's
+   own transform instead, leaving the badge essentially where it was
+   while clearing the larger card fan below it.
+   CAVEAT: 28px is a starting estimate (the known +17px from 12.0 Part
+   D plus a working buffer for pre-existing tightness), not yet
+   verified live across every window size -- may need further tuning,
+   particularly on smaller viewports. */
+.seat.is-you {
+  transform: translate(-50%, -50%) translateY(-28px);
+}
 
 /* v4.2 §10.2: the avatar is gone (purely decorative, no function). The
    Dealer marker now occupies that same slot in the seat-info row --
@@ -1353,6 +1373,22 @@ select {
 /* ---------- Betting Rail (shared status + personal eligible actions) ---------- */
 
 .betting-rail {
+  /* FIXED 12.1 (Part C): stacking-order defect, not an opacity issue --
+     the rail's translucent background was already correct. Every seat,
+     community card, pot display, etc. are position:absolute with an
+     explicit z-index:2; per CSS stacking rules a positioned descendant
+     with a non-auto z-index paints in a later phase than an
+     unpositioned, static sibling regardless of DOM order. .betting-rail
+     had no position/z-index of its own, so despite sitting later in
+     the markup it was still painted before the table's card elements --
+     a card's tilted corner (rotation is paint-only, doesn't affect
+     layout) could visually extend into the rail's space instead of
+     showing through its translucent background. z-index:4 sits above
+     every existing z-index:2 use and below the one z-index:5 (a card's
+     own hover-lift effect -- deliberately left alone, a harmless,
+     extremely narrow edge case). */
+  position: relative;
+  z-index: 4;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;

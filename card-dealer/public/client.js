@@ -2943,34 +2943,47 @@
 
     if (gameTable.bettingOpen) {
       const turnPlayer = gameTable.players.find((p) => p.id === gameTable.currentTurnPlayerId);
-      // CHANGED 12.0 (Part C): the shared line is restyled so the figure
-      // that matters to the *viewer* leads, bold, with everything else
-      // demoted to a lower-case parenthetical aside -- replaces the old
-      // flat "Total Bet: $Z · $Y to You · $X to [Name]" line built via a
-      // single textContent assignment. Built as DOM nodes now
-      // (createElement('strong') + createTextNode) so the lead figure
-      // can be genuinely bold without a new CSS class; player names go
-      // through textContent, not string concatenation into markup, so
-      // this carries no injection risk despite user-entered names.
+      // CHANGED 12.0 (Part C), then 12.1 (Parts A & B): the shared line
+      // is restyled so the figure that matters to the *viewer* leads,
+      // bold, replacing the old flat "Total Bet: $Z · $Y to You · $X to
+      // [Name]" line built via a single textContent assignment. Built
+      // as DOM nodes (createElement('strong') + createTextNode) so the
+      // lead figure can be genuinely bold without a new CSS class;
+      // player names go through textContent, not string concatenation
+      // into markup, so this carries no injection risk despite
+      // user-entered names.
+      //
+      // FIXED 12.1 (Part A): format selection previously included
+      // `toYou > 0`, which meant ANY viewer with an outstanding amount
+      // got Format 1 regardless of whose turn it actually was --
+      // currentBetToCall is seeded the moment a betting round opens, so
+      // every player who hasn't yet matched it computed toYou > 0,
+      // including someone who won't actually face that decision until
+      // the turn comes back around to them. Confirmed live via two
+      // independent reports (an ordinary bet, and Stud's Bring-In).
+      // Format selection now depends purely on whose turn it is.
       //
       // Two formats, chosen per-viewer, per render:
-      //   1. Facing a bet, or it's genuinely the viewer's own turn to
-      //      act (including a $0 check), or there's no other player to
-      //      name at all: "$Y TO YOU (current bet: $Z)".
-      //   2. Not facing a bet, and it's someone else's turn: "$X To
-      //      [Player] $Y to you (current bet: $Z)", with the second
-      //      figure and the parenthetical both demoted to a lower-case,
-      //      unbolded aside.
+      //   1. Genuinely the viewer's own turn to act (including a $0
+      //      check), or there's no turn player to name at all:
+      //      "$Y TO YOU (current bet: $Z)" -- unchanged by 12.1,
+      //      still a lower-case parenthetical.
+      //   2. CHANGED 12.1 (Part B): every other case -- including a
+      //      viewer with money outstanding who isn't up yet --
+      //      restyled from a lower-case parenthetical aside to three
+      //      explicit, slash-separated, Title Case segments:
+      //      "$X To Player [Name] / $Y To You / Current Bet: $Z".
       //
-      // Stud's unresolved Bring-In obligation still swaps the
-      // parenthetical's label ("bring in" instead of "current bet"),
-      // now lower-cased to match this line's new house style -- same
+      // Stud's unresolved Bring-In obligation still swaps the aside's
+      // label ("bring in"/"Bring In" instead of "current bet"/"Current
+      // Bet", cased to match whichever format is active) -- same
       // underlying value either way, no other change.
       const bringInActive = gameTable.profile === 'stud' && gameTable.bringInObligationId;
       const asideLabel = bringInActive ? 'bring in' : 'current bet';
+      const asideLabelTitleCase = bringInActive ? 'Bring In' : 'Current Bet';
       const toYou = me ? Math.max(0, gameTable.currentBetToCall - me.currentBet) : 0;
       const isMyTurn = !!turnPlayer && turnPlayer.id === state.playerId;
-      const useFormat1 = toYou > 0 || isMyTurn || !turnPlayer;
+      const useFormat1 = isMyTurn || !turnPlayer;
 
       el.bettingRailShared.textContent = '';
       const lead = document.createElement('strong');
@@ -2979,8 +2992,11 @@
         el.bettingRailShared.append(lead, document.createTextNode(` (${asideLabel}: $${gameTable.currentBetToCall})`));
       } else {
         const toThem = Math.max(0, gameTable.currentBetToCall - turnPlayer.currentBet);
-        lead.textContent = `$${toThem} To ${turnPlayer.name}`;
-        el.bettingRailShared.append(lead, document.createTextNode(` $${toYou} to you (${asideLabel}: $${gameTable.currentBetToCall})`));
+        lead.textContent = `$${toThem} To Player ${turnPlayer.name}`;
+        el.bettingRailShared.append(
+          lead,
+          document.createTextNode(` / $${toYou} To You / ${asideLabelTitleCase}: $${gameTable.currentBetToCall}`)
+        );
       }
 
       // NEW 9.2 (§6.10), extended to Stud/Draw in 9.4: persistent

@@ -521,7 +521,10 @@
     </dialog>
 
     <!-- ---- Select Game Choice modal (NEW 4.1): replaces the old inline Dealer's Rail dropdown ---- -->
-    <dialog id="select-dialog" class="chip-dialog">
+    <!-- CHANGED 12.2 (Part G): select-dialog class added alongside
+         chip-dialog so only this modal gets the wider 560px width --
+         see .chip-dialog.select-dialog in style.css. -->
+    <dialog id="select-dialog" class="chip-dialog select-dialog">
       <h3>Select Game Choice</h3>
       <p class="dialog-hint">Grouped by profile. Opens Options automatically once chosen.</p>
       <div class="select-index" id="select-index"></div>

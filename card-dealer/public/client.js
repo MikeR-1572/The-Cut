@@ -1635,27 +1635,69 @@
   });
   el.btnSelectClose.addEventListener('click', () => el.selectDialog.close());
 
+  /**
+   * NEW 12.2 (Part A): splits profile:"stud" into two Select-dialog
+   * groups -- "Stud" (the two base games) and "7-Card Stud Variants"
+   * (the eight variants). No new game-choices.json field: every
+   * current variant id already starts with "stud-7card-", and the two
+   * base games' ids (stud-5card, stud-7card) don't -- this distinction
+   * already exists in the data, so it's read directly off the id
+   * rather than adding a field that would need to be hand-maintained
+   * on every future entry. Every other profile is unaffected -- this
+   * makes "stud-7card-" a real naming contract for any future 7-Card
+   * Stud variant going forward.
+   */
+  function selectGroupKeyFor(gameChoice) {
+    if (!gameChoice) return undefined;
+    if (gameChoice.profile === 'stud' && gameChoice.id.startsWith('stud-7card-')) {
+      return 'stud-variants';
+    }
+    return gameChoice.profile;
+  }
+
   function buildSelectIndex() {
     const activeId = state.lastGameTable?.gameChoiceId;
-    const activeProfile = state.gameChoices.find((g) => g.id === activeId)?.profile;
+    // CHANGED 12.2 (Part A): grouped by selectGroupKeyFor() instead of
+    // raw profile, so the active choice's group (including the new
+    // stud-variants split) still auto-opens correctly. Unchanged
+    // otherwise: no active choice yet -> undefined -> every group
+    // starts collapsed, same as before 12.2.
+    const activeGroupKey = selectGroupKeyFor(state.gameChoices.find((g) => g.id === activeId));
     el.selectIndex.innerHTML = '';
-    const groups = { draw: 'Draw', stud: 'Stud', holdem: "Hold'em" };
-    for (const [profileKey, label] of Object.entries(groups)) {
-      const presets = state.gameChoices.filter((g) => g.profile === profileKey);
+    const groups = { draw: 'Draw', stud: 'Stud', 'stud-variants': '7-Card Stud Variants', holdem: "Hold'em" };
+    // NEW 12.2 (Part B): every group rendered this pass, so any single
+    // header's click can close every *other* tracked group -- true
+    // single-open accordion, replacing the old independent-toggle
+    // behavior where each header only ever touched its own group.
+    const openable = [];
+    for (const [groupKey, label] of Object.entries(groups)) {
+      const presets = state.gameChoices.filter((g) => selectGroupKeyFor(g) === groupKey);
       if (presets.length === 0) continue;
 
       const presetList = document.createElement('div');
       presetList.className = 'select-group-list';
-      const startExpanded = profileKey === activeProfile;
+      const startExpanded = groupKey === activeGroupKey;
       presetList.hidden = !startExpanded;
 
       const groupLabel = document.createElement('button');
       groupLabel.type = 'button';
       groupLabel.className = 'select-group-label' + (startExpanded ? ' is-expanded' : '');
-      groupLabel.textContent = label;
+      // NEW 12.2 (Part D): entry-count suffix appended to the label
+      // text -- "Draw — 3 Games", singular "— 1 Game" if a group ever
+      // has exactly one entry. Styling itself is unchanged (no CSS
+      // touched for .select-group-label).
+      groupLabel.textContent = `${label} \u2014 ${presets.length} ${presets.length === 1 ? 'Game' : 'Games'}`;
       groupLabel.setAttribute('aria-expanded', String(startExpanded));
+      openable.push({ presetList, groupLabel });
       groupLabel.addEventListener('click', () => {
         const nowExpanded = presetList.hidden; // about to toggle open
+        // CHANGED 12.2 (Part B): close every other tracked group first.
+        for (const other of openable) {
+          if (other.presetList === presetList) continue;
+          other.presetList.hidden = true;
+          other.groupLabel.classList.remove('is-expanded');
+          other.groupLabel.setAttribute('aria-expanded', 'false');
+        }
         presetList.hidden = !nowExpanded;
         groupLabel.classList.toggle('is-expanded', nowExpanded);
         groupLabel.setAttribute('aria-expanded', String(nowExpanded));

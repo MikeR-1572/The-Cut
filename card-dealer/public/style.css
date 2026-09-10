@@ -1453,6 +1453,14 @@ select {
   overflow-y: auto;
 }
 .chip-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+/* NEW 12.2 (Part G): Select Game's dialog needs to be wider (560px) to
+   fit the new 3-column grid without heavy wrapping, but .chip-dialog
+   is shared by ~20 other modals (Buy Chips, Kill Hand, All-In warning,
+   Options, Table Owner Tools, About, etc.) -- widening it directly
+   would widen all of them. A dedicated class instead, combined with
+   .chip-dialog on #select-dialog only (specificity 0,2,0 beats the
+   base rule's 0,1,0 regardless of stylesheet order). */
+.chip-dialog.select-dialog { width: min(560px, 90vw); }
 .chip-dialog h3 { font-size: 1.15rem; color: var(--brass-bright); margin-bottom: 12px; }
 
 /* NEW 9.6 (§10.4.2): every dialog's own <h3> title doubles as its
@@ -1546,21 +1554,34 @@ select {
   transition: transform 0.2s ease;
 }
 .select-group-label.is-expanded::after { transform: rotate(90deg); }
-/* CHANGED 7.1: gap 8px -> 4px, same reasoning as .select-index above. */
-.select-group-list { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; }
+/* CHANGED 12.2 (Part C): flex column -> 3-column equal-width grid.
+   Rows still auto-size to their own content -- no min-height was ever
+   set on .select-entry, before or after, so a row of short labels
+   stays short and only a row that needs to wrap takes the extra
+   height. */
+.select-group-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 6px; padding-top: 8px; }
 .select-entry {
   width: 100%;
-  text-align: left;
-  padding: 5px 12px; /* CHANGED 7.1 (§10.4.1): 8px -> 5px vertical, tightens per-item height across the board */
+  /* CHANGED 12.2 (Part E): the one real visual departure -- left-align
+     -> center (needed for the grid to read correctly), black-tint fill
+     -> transparent/brass-outlined chip, 0.85rem/600 -> 0.72rem/500 so
+     entry text reads as subordinate to its group header, not louder
+     than it. */
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 6px;
   border-radius: var(--radius-s);
-  border: 1px solid rgba(201, 163, 92, 0.25);
-  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--brass);
+  background: transparent;
   color: var(--ivory);
   font-family: var(--font-body);
-  font-weight: 600;
-  font-size: 0.85rem;
+  font-weight: 500;
+  font-size: 0.72rem;
+  line-height: 1.25;
 }
-.select-entry:hover { background: rgba(201, 163, 92, 0.14); }
+.select-entry:hover { background: rgba(201, 163, 92, 0.14); border-color: var(--brass-bright); }
 .select-entry.is-active { border-color: var(--brass-bright); background: rgba(201, 163, 92, 0.14); }
 
 /* ---------- About modal (NEW 4.1) ---------- */

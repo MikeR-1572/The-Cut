@@ -1,12 +1,102 @@
-# The Cut — Card Dealing & Betting Engine (v12.1)
+# The Cut — Card Dealing & Betting Engine (v12.2)
 
-**12.0 Play-Testing Follow-Ups** — built from `the-cut-spec_v12-1.md`,
-consolidating everything found during 12.0 play-testing. Still
-cosmetic-only/low-risk — no betting, dealing, or reconnect logic
-touched, same as 12.0 itself. `npm test` — **448 tests** (unchanged —
-every item in this release is a pure markup/CSS/rendering/
-static-content change; nothing new at the `GameTable` level to
-unit-test).
+**Select Game Dialog Redesign** — built from `the-cut-spec_v12-2.md`.
+Unlike 12.0/12.1, this one didn't originate as written spec text — it
+was worked out directly with Mike in Dev chat the night before,
+iterating live against an interactive mockup
+(`game-selection-mockup-v2.html`, starting point
+`Game_Selection_Menu.pdf`), then written up
+(`select-game-redesign-handoff.md`) for Spec Chat to turn into
+`the-cut-spec_v12-2.md`. Still cosmetic-only/low-risk — purely
+client-side rendering, no `GameTable`/server logic touched, same
+category as 12.0/12.1. `npm test` — **448 tests** (unchanged — this
+release only touches `buildSelectIndex()` and its CSS; nothing new at
+the `GameTable` level to unit-test).
+
+### Part A — Three groups → four: Stud split out
+
+`profile: "stud"` (5-Card Stud through Low Chicago, 10 entries) now
+splits into two Select-dialog groups: **Stud** (the two base games)
+and **7-Card Stud Variants** (the eight variants). **No new
+`game-choices.json` field** — every variant id already starts with
+`stud-7card-`, and the two base games' ids (`stud-5card`,
+`stud-7card`) don't, so the split reads directly off the existing id
+pattern (`selectGroupKeyFor()`, new in `client.js`) rather than adding
+a field that would need hand-maintenance on every future entry.
+Confirmed directly against the real `game-choices.json`: this produces
+exactly 3/2/8/3 across the four groups, zero exceptions. Makes
+`stud-7card-` a real naming contract for any future 7-Card Stud
+variant going forward — flagged in VERSIONING as a low-risk-but-real
+tradeoff, not a fragile one.
+
+### Part B — Independent-toggle groups → true single-open accordion
+
+`buildSelectIndex()` now tracks every group rendered in the current
+pass (`openable`) and, on any header's click, closes every *other*
+tracked group before toggling the clicked one — previously each
+header's click handler only ever touched its own group, so Draw and
+Stud (etc.) could both sit open at once. `aria-expanded` kept in sync
+for every group on every click, not just the one clicked.
+
+### Part C — Entries: vertical list → 3-column equal-width grid
+
+`.select-group-list`: `display: flex; flex-direction: column` →
+`display: grid; grid-template-columns: repeat(3, 1fr)`. Rows still
+auto-size to their own content — no `min-height` was ever set on
+`.select-entry`, before or after.
+
+### Part D — Group header text: count suffix appended
+
+Each group header now reads e.g. "Draw — 3 Games," "7-Card Stud
+Variants — 8 Games" (singular "— 1 Game" if a group ever has exactly
+one entry) — text-content change only in `buildSelectIndex()`;
+`.select-group-label`'s own CSS is completely untouched.
+
+### Part E — Entry button style: the one real visual departure
+
+| Property | Before | After |
+|---|---|---|
+| Background | `rgba(0, 0, 0, 0.18)` | `transparent` |
+| Border | `rgba(201, 163, 92, 0.25)` | `var(--brass)` |
+| Text align | left | center |
+| Font size / weight | `0.85rem` / `600` | `0.72rem` / `500` |
+
+Hover now also brightens the border (`border-color:
+var(--brass-bright)`, added to `:hover`, matching the mockup — the
+pre-12.2 rule didn't do this). `.select-entry.is-active` kept
+unchanged — its existing brass-bright border/brass-tint background
+already reads correctly against the new transparent base.
+
+### Part F — Selection behavior: confirmed unchanged
+
+Clicking an entry still does exactly what it did before —
+`send('setGameChoice', ...)` then `el.selectDialog.close()`. No new
+lingering "selected" state inside the dialog.
+
+### Part G — Dialog width: 560px, scoped correctly
+
+**A real bug caught before implementation**: `.chip-dialog` is the
+shared base class for ~20 other modals (Buy Chips, Options, Table
+Owner Tools, About, and more — confirmed directly, 20 `class="chip-
+dialog...` matches in `index.html`). Widening it directly would have
+widened all of them. Fixed with a dedicated class instead —
+`#select-dialog` now carries `class="chip-dialog select-dialog"`, and
+`.chip-dialog.select-dialog { width: min(560px, 90vw); }` (specificity
+0,2,0) wins over the shared 440px rule regardless of stylesheet order.
+
+### Assumption carried forward, not changed
+
+Which group auto-opens on dialog open still follows the pre-existing
+logic unchanged: whichever group contains the currently-active game
+choice starts expanded (now correctly resolved through
+`selectGroupKeyFor()` for the new 4-group split); if there's no active
+choice yet, all four groups start collapsed. The mockup's own
+always-open-Draw default was a demo simplification, not an intended
+behavior change, per the spec's own explicit note.
+
+---
+
+## v12.1 — 12.0 Play-Testing Follow-Ups
 
 ### Part A — Shared betting line: real bug fix in Format 1/Format 2 selection
 

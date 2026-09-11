@@ -136,6 +136,43 @@ test('Phase machine: Showdown reAnteable exception -- nobody claims, New Hand av
   assert.strictEqual(room.handPhase, 'RequestAntes');
 });
 
+test('BUG FIX 12.5 (Part A): a folded player is not charged an uncollectable ante on a re-ante New Hand', () => {
+  // Reproduces the exact reported scenario: a player folds mid-hand,
+  // the hand reaches Showdown with nobody claiming, New Hand fires
+  // within the same Cycle. Before this fix, _autoApplyAnte()'s
+  // flat-ante branch charged the folded player a real oweAnte anyway --
+  // _dealableActivePlayers() (and therefore
+  // _maybeAdvanceFromRequestAntes()) already correctly excluded them,
+  // so they were stuck with an obligation and no legal way to post it.
+  const room = drawRoomAtFirstBetting('draw-5card-jacks', 'Alice', 'Bob', 'Carl');
+  room.openBetting('p1');
+  room.fold('p2'); // folds mid-hand -- the player this bug affects
+  room.placeBet('p3', 20); // p3 opens, avoids Trigger A, reaches Showdown normally
+  room.call('p1');
+  room.standPat('p1');
+  room.standPat('p3');
+  room.dealToAllPlayers('p1');
+  room.openBetting('p1');
+  let guard = 0;
+  while (room.bettingOpen && guard++ < 20) room.check(room.currentTurnPlayerId);
+  assert.strictEqual(room.handPhase, 'Showdown');
+
+  const result = room.newHand('p1'); // nobody claimed
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(room.handPhase, 'RequestAntes');
+
+  // The actual bug: p2 (folded in the prior hand) must not be charged
+  // an ante for this new hand at all.
+  assert.strictEqual(room.getPlayer('p2').oweAnte, 0);
+
+  // p1 and p3 alone posting is sufficient to advance -- confirms p2
+  // stays correctly excluded rather than silently blocking the table.
+  room.postAnteBlind('p1');
+  assert.strictEqual(room.handPhase, 'RequestAntes'); // p3 still owes
+  room.postAnteBlind('p3');
+  assert.strictEqual(room.handPhase, 'OpeningDeal'); // advanced without p2 ever posting anything
+});
+
 test('Phase machine: New Hand is unavailable for non-reAnteable Draw presets even at Showdown', () => {
   const room = drawRoomAtShowdown('draw-5card', 'Alice', 'Bob'); // reAnteable: false
   assert.strictEqual(room.handPhase, 'Showdown');

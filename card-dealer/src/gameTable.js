@@ -2735,7 +2735,12 @@ class GameTable {
       const candidate = this.getPlayer(this.turnOrder[(idx + step) % this.turnOrder.length]);
       // CHANGED 9.6: also excludes chips === 0 -- a $0-chip player is
       // never assigned a blind, computed fresh here, never a persisted flag.
-      if (candidate && !candidate.sittingOut && candidate.chips > 0) blindSeats.push(candidate);
+      // FIXED 12.5 (Part A): also excludes folded -- matches
+      // _dealableActivePlayers()'s own filter exactly, confirmed by
+      // direct comparison. A folded player was being assigned a real
+      // blind obligation for a hand they were never going to be dealt
+      // into, with no legal way to ever post it.
+      if (candidate && !candidate.folded && !candidate.sittingOut && candidate.chips > 0) blindSeats.push(candidate);
     }
     return blindSeats;
   }
@@ -2765,7 +2770,15 @@ class GameTable {
       if (typeof amount === 'number') {
         for (const player of this.players) {
           // CHANGED 9.6: also excludes chips === 0 -- computed fresh, never a persisted flag.
-          if (!player.sittingOut && player.chips > 0) player.oweAnte = amount;
+          // FIXED 12.5 (Part A): also excludes folded -- matches
+          // _dealableActivePlayers()'s own filter exactly (confirmed by
+          // direct comparison, not assumed). A folded player was left
+          // with a real, nonzero oweAnte for a re-ante New Hand they
+          // were correctly excluded from being dealt into at all --
+          // stuck with an obligation and no legal way to post it, since
+          // _maybeAdvanceFromRequestAntes() (correctly) never waited on
+          // them either.
+          if (!player.folded && !player.sittingOut && player.chips > 0) player.oweAnte = amount;
         }
       }
     }
@@ -3066,6 +3079,19 @@ class GameTable {
     // prior version: still one flat `gameOptions` object, merged here
     // once at selection time, exactly as `setGameOption` already expects
     // to read/write it.
+    // NEW 12.5 (Part C, documentation only -- no behavior change):
+    // this line unconditionally resets gameOptions to the preset's
+    // stored defaults EVEN if gameChoiceId is already the same preset
+    // that's already active -- there is deliberately no "already the
+    // active game, leave gameOptions alone" check. Confirmed real,
+    // asked-about-live difference from `startGame()` (Same Game),
+    // which never calls setGameChoice at all and so never touches
+    // gameOptions -- whatever was configured for the hand just played
+    // carries over exactly as-is. Selecting the identical game via
+    // Select, by contrast, discards any Dealer customization from the
+    // hand just played. As far as this session can tell, intentional
+    // rather than a bug -- documented here since it was only ever
+    // explained in chat before now.
     this.gameOptions = { ...preset.hiddenOptions, ...preset.dealerOptions };
     this.reAnteable = typeof preset.reAnteable === 'boolean' ? preset.reAnteable : DEFAULT_PRESET_FLAGS.reAnteable;
     this.advanceTurnRequired =

@@ -120,6 +120,14 @@
         <button class="btn btn-secondary" id="btn-open-select-dialog" type="button" hidden title="Choose the Game Choice for the next hand">Select</button>
         <button class="btn btn-secondary" id="btn-open-options-dialog" type="button" disabled title="View or edit the active Game Choice's options">Options</button>
         <button class="btn btn-secondary" id="btn-open-rules-dialog" type="button" title="Browse rules for every Game Choice">Game Rules</button>
+        <!-- NEW 12.5 (Part E): "Hand Ranks" -- immediately after Game
+             Rules, same row, same styling. Game Rail rather than
+             Player Rail: reference content about the game itself, not
+             the viewing player's own session -- the same category
+             Game Rules already occupies, and genuinely game-agnostic
+             in a way Game Rules itself isn't (a flush beats a straight
+             regardless of which Game Choice is active). -->
+        <button class="btn btn-secondary" id="btn-open-hand-ranks-dialog" type="button" title="Hand rankings and suit ranking reference">Hand Ranks</button>
       </div>
     </div>
 
@@ -517,6 +525,33 @@
       <div class="rules-index" id="rules-index"></div>
       <div class="dialog-actions">
         <button type="button" class="btn btn-secondary" id="btn-rules-close" title="Close">Close</button>
+      </div>
+    </dialog>
+
+    <!-- NEW 12.5 (Part E): static hand-rankings/suit-ranking reference --
+         identical for every viewer, no editable/read-only distinction
+         (unlike Options), content never changes so it's built once,
+         lazily, the first time this dialog opens (see buildHandRanksContent()
+         in client.js) rather than rebuilt on every open the way Game
+         Rules' own index needs to be. Widened to 820px via a scoped
+         class, same combined-selector pattern as .select-dialog/
+         .options-dialog (12.2/12.3) for a guaranteed override
+         regardless of stylesheet order -- not the weaker cascade-order-
+         only pattern .rules-dialog above happens to use. Close is a
+         standard bottom-right button in .dialog-actions, matching every
+         other dialog in the app -- the mockup's own small corner "x"
+         was deliberately not carried over, per Mike's direct follow-up,
+         since it would have been the one dialog in the app using a
+         different close pattern. -->
+    <dialog id="hand-ranks-dialog" class="chip-dialog hand-ranks-dialog">
+      <h3>Hand Rankings</h3>
+      <div class="hand-ranks-columns" id="hand-ranks-columns"></div>
+      <div class="hand-ranks-suit-section">
+        <h4>Suit Ranking (High to Low)</h4>
+        <div class="hand-ranks-cards" id="hand-ranks-suit-cards"></div>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="btn-hand-ranks-close" title="Close">Close</button>
       </div>
     </dialog>
 

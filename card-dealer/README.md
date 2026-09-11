@@ -1,10 +1,97 @@
-# The Cut — Card Dealing & Betting Engine (v12.4)
+# The Cut — Card Dealing & Betting Engine (v12.5)
 
-**Game Options Dialog Follow-Ups** — built from `the-cut-spec_v12-4.md`,
-consolidating 12.3 play-testing findings. Still no `game-choices.json`
-changes. `npm test` — **448 tests** (unchanged — this release is
-layout/CSS plus one client-side validation fix; nothing new at the
-`GameTable` level to unit-test).
+**Ante Bug, Options Race Condition, Dropdown Colors, Hand Ranks Dialog**
+— built from `the-cut-spec_v12-5.md`. **Not cosmetic-only** — Parts A
+and B are real server/client gameplay-logic fixes found live during
+Mike's own testing. `npm test` — **449 tests** (Part A adds one
+permanent regression test), confirmed clean across 30+ consecutive
+full-suite runs.
+
+### Part A — Folded player charged an uncollectable ante on a re-ante New Hand
+
+`_autoApplyAnte()`'s flat-ante branch and `_computeBlindSeats()` both
+filtered on `!sittingOut && chips > 0` only — missing the `folded`
+check `_dealableActivePlayers()` (and therefore
+`_maybeAdvanceFromRequestAntes()`) already applied. A folded player
+got a real, nonzero `oweAnte` for a re-ante New Hand they were
+correctly excluded from being dealt into, with no legal way to ever
+post it. Both functions now match `_dealableActivePlayers()`'s filter
+exactly. New permanent regression test
+(`test/profiles/draw.test.js`) reproduces the exact reported
+scenario; confirmed it genuinely fails without the fix (reverted it,
+confirmed the failure, restored it) before trusting it.
+
+### Part B — Options dialog: Small Bet/Big Bet could silently disagree with the server
+
+A third instance of the stale-closure bug `pushComputedBets()` had
+already been caught and fixed twice in 12.3 — a third spot doing the
+same thing was missed. Switching Bet/Raise Limits to Fixed-Limit
+*after* editing Ante/Bring In but *before* that edit's own round-trip
+landed meant the value actually sent to the server used the stale,
+pre-edit source value, while the on-screen display (which always
+reads straight off the DOM) showed the correct new one — exactly the
+"$4 on screen, $2 in play" symptom reported live. Fixed by reading the
+source field's own live DOM value directly in this one case, matching
+the two spots already fixed correctly. Browser-DOM-dependent, so the
+(entirely server-side) automated suite can't exercise it either way —
+verified instead with an isolated logic simulation reproducing the
+exact symptom under the old code and the correct result under the new.
+
+### Part C — "Select" vs. "Same Game": confirmed real difference, documented
+
+No code changed — a real, intentional difference clarified and
+written down where it'll actually be found again: a comment at the
+`this.gameOptions = ...` reset line in `setGameChoice()`
+(`gameTable.js`), cross-referenced from the Same Game button handler
+in `client.js`. Same Game calls `startGame()` directly and never
+touches `gameOptions`; Select, even re-picking the identical game,
+always resets every option back to that preset's stored defaults.
+
+### Part D — Dropdown option-list colors: generalized app-wide
+
+12.3 found and fixed this exact issue once already, scoped narrowly to
+the Options dialog's own selects. Confirmed live elsewhere (the
+Dealer's Rail "Select Opening Bettor" dropdown) and flagged as a
+general problem, not unique to one control. Generalized `select
+option { background: var(--felt-deep); color: var(--ivory); }` onto
+the shared base `select` rule; the narrower, now-redundant
+`.option-field select option` copy removed rather than left as a
+duplicate.
+
+### Part E — New: Hand Rankings reference dialog
+
+New "Hand Ranks" button, Game Rail, immediately after "Game Rules" —
+same row, same styling. Static reference content, identical for every
+viewer, no `game-choices.json`/`GameTable` involvement at all. Three
+columns (hands 1–4, 5–8, 9–10 + Suit Ranking underneath); each entry
+is number + name plus a 5-card example row, no description line. Suit
+Ranking: same card treatment, no rank in the corners, order Spades >
+Hearts > Diamonds > Clubs (reverse-alphabetical by first letter,
+confirmed correct). Cards reuse the app's actual `.card`/`.card-index`/
+`.card-suit-glyph` classes directly (scoped smaller, 39×56px, via a
+dedicated builder rather than `renderCard()` — that one adds fan-tilt
+and a face-up/down marker, both meaningless here). Content is static
+and built once, lazily, on first open — not rebuilt every time the
+way Game Rules' own index needs to be. Dialog widened to 820px via
+`.chip-dialog.hand-ranks-dialog`, the same combined-selector pattern
+as `.select-dialog`/`.options-dialog` (12.2/12.3), not the weaker
+cascade-order-only pattern `.rules-dialog` happens to use. Close is a
+standard bottom-right button in `.dialog-actions`, matching every
+other dialog — the mockup's own corner "×" was deliberately not
+carried over, per Mike's direct follow-up.
+
+### Investigated, not acted on this release
+
+Inactivity Timeout not closing tables that should be idle — root
+cause found (`touchActivity()` treats every reconnect, automatic or
+manual, as real activity; 11.3/11.4 made the two indistinguishable on
+the wire), but Mike wants to observe the actual behavior more directly
+before deciding how to handle it. Nothing changed this release;
+documented so the finding isn't lost.
+
+---
+
+## v12.4 — Game Options Dialog Follow-Ups
 
 ### Part A — Header restructure
 

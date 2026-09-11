@@ -31,6 +31,7 @@
     discardSelection: new Set(), // card ids currently selected for Discard
     gameChoices: [], // fetched once from /game-choices.json (v4.0)
     gameOptionsEditorFor: null, // gameChoiceId the Options dialog fields were last built for -- rebuild only when it changes
+    handRanksBuilt: false, // NEW 12.5 (Part E): static content, built once on first open, never rebuilt
     appInfo: null, // fetched once from /app-info.json (v4.1, About button)
     pendingAutoOpenOptions: false, // v4.1: Select auto-opens Options once the new gameChoiceId lands
     wasShowingTurnActions: false, // NEW 5.1 (bug fix) -- edge-triggered Bet/Raise box clearing; see renderBettingRail
@@ -252,6 +253,12 @@
     rulesDialog: document.getElementById('rules-dialog'),
     rulesIndex: document.getElementById('rules-index'),
     btnRulesClose: document.getElementById('btn-rules-close'),
+    // NEW 12.5 (Part E)
+    btnOpenHandRanksDialog: document.getElementById('btn-open-hand-ranks-dialog'),
+    handRanksDialog: document.getElementById('hand-ranks-dialog'),
+    handRanksColumns: document.getElementById('hand-ranks-columns'),
+    handRanksSuitCards: document.getElementById('hand-ranks-suit-cards'),
+    btnHandRanksClose: document.getElementById('btn-hand-ranks-close'),
 
     selectDialog: document.getElementById('select-dialog'),
     selectIndex: document.getElementById('select-index'),
@@ -1607,6 +1614,109 @@
   });
   el.btnRulesClose.addEventListener('click', () => el.rulesDialog.close());
 
+  // ---- Hand Ranks dialog (NEW 12.5, Part E) ----
+  // Static reference content, identical for every viewer, no
+  // editable/read-only distinction to build at all (unlike Options) --
+  // built once, lazily, the first time the dialog is opened, not
+  // rebuilt on every subsequent open the way Game Rules' own index
+  // needs to be (that one has to re-scroll to whichever preset is
+  // currently active, which can change between opens; nothing here has
+  // an equivalent).
+
+  el.btnOpenHandRanksDialog.addEventListener('click', () => {
+    if (!state.handRanksBuilt) {
+      buildHandRanksContent();
+      state.handRanksBuilt = true;
+    }
+    el.handRanksDialog.showModal();
+  });
+  el.btnHandRanksClose.addEventListener('click', () => el.handRanksDialog.close());
+
+  const HAND_RANKS = [
+    { name: 'Royal Flush', cards: [['A', 'spades'], ['K', 'spades'], ['Q', 'spades'], ['J', 'spades'], ['10', 'spades']] },
+    { name: 'Straight Flush', cards: [['9', 'hearts'], ['8', 'hearts'], ['7', 'hearts'], ['6', 'hearts'], ['5', 'hearts']] },
+    { name: 'Four of a Kind', cards: [['K', 'spades'], ['K', 'hearts'], ['K', 'diamonds'], ['K', 'clubs'], ['3', 'spades']] },
+    { name: 'Full House', cards: [['8', 'spades'], ['8', 'hearts'], ['8', 'diamonds'], ['4', 'clubs'], ['4', 'spades']] },
+    { name: 'Flush', cards: [['A', 'clubs'], ['J', 'clubs'], ['8', 'clubs'], ['6', 'clubs'], ['2', 'clubs']] },
+    { name: 'Straight', cards: [['9', 'spades'], ['8', 'hearts'], ['7', 'diamonds'], ['6', 'clubs'], ['5', 'spades']] },
+    { name: 'Three of a Kind', cards: [['7', 'spades'], ['7', 'hearts'], ['7', 'diamonds'], ['K', 'clubs'], ['2', 'spades']] },
+    { name: 'Two Pair', cards: [['J', 'spades'], ['J', 'hearts'], ['4', 'diamonds'], ['4', 'clubs'], ['9', 'spades']] },
+    { name: 'One Pair', cards: [['10', 'spades'], ['10', 'hearts'], ['K', 'diamonds'], ['6', 'clubs'], ['3', 'spades']] },
+    { name: 'High Card', cards: [['A', 'spades'], ['J', 'hearts'], ['8', 'diamonds'], ['5', 'clubs'], ['2', 'spades']] },
+  ];
+  // Reverse-alphabetical by the suit's first letter (S > H > D > C) --
+  // confirmed correct by Mike, see hand-ranks-handoff.md.
+  const SUIT_RANK_ORDER = ['spades', 'hearts', 'diamonds', 'clubs'];
+
+  /**
+   * Dedicated builder, not renderCard() -- that one adds fan-tilt
+   * rotation (via the --tilt custom property) and a face-up/down
+   * visibility marker (.card--public/.card--down), both meaningless
+   * for a static, non-interactive reference list. Reuses the same
+   * .card/.card-index/.card-suit-glyph classes renderCard() itself
+   * uses, just without those two additions -- scoped smaller via the
+   * .hand-ranks-cards descendant selector in style.css, not a
+   * different card system.
+   */
+  function buildHandRanksCard(rank, suit) {
+    const div = document.createElement('div');
+    div.className = 'card' + (RED_SUITS.has(suit) ? ' is-red' : '');
+    const glyph = SUIT_GLYPH[suit] || '';
+    if (rank) {
+      const top = document.createElement('div');
+      top.className = 'card-index';
+      top.innerHTML = `<span>${rank}</span>`;
+      const center = document.createElement('div');
+      center.className = 'card-suit-glyph';
+      center.textContent = glyph;
+      const bottom = document.createElement('div');
+      bottom.className = 'card-index bottom';
+      bottom.innerHTML = `<span>${rank}</span>`;
+      div.append(top, center, bottom);
+    } else {
+      // Suit Ranking row: "just the suit," no rank corners at all.
+      div.classList.add('card--suit-only');
+      const center = document.createElement('div');
+      center.className = 'card-suit-glyph';
+      center.textContent = glyph;
+      div.appendChild(center);
+    }
+    return div;
+  }
+
+  function buildHandRanksContent() {
+    el.handRanksColumns.innerHTML = '';
+    const columns = [document.createElement('div'), document.createElement('div'), document.createElement('div')];
+    columns.forEach((col) => col.className = 'hand-ranks-col');
+
+    HAND_RANKS.forEach((entry, i) => {
+      const row = document.createElement('div');
+      row.className = 'hand-ranks-row';
+
+      const header = document.createElement('div');
+      header.className = 'hand-ranks-header';
+      const num = document.createElement('span');
+      num.className = 'hand-ranks-number';
+      num.textContent = (i + 1) + '.';
+      const h4 = document.createElement('h4');
+      h4.textContent = entry.name;
+      header.append(num, h4);
+
+      const cardsWrap = document.createElement('div');
+      cardsWrap.className = 'hand-ranks-cards';
+      entry.cards.forEach(([rank, suit]) => cardsWrap.appendChild(buildHandRanksCard(rank, suit)));
+
+      row.append(header, cardsWrap);
+      const colIndex = i < 4 ? 0 : i < 8 ? 1 : 2;
+      columns[colIndex].appendChild(row);
+    });
+
+    columns.forEach((col) => el.handRanksColumns.appendChild(col));
+
+    el.handRanksSuitCards.innerHTML = '';
+    SUIT_RANK_ORDER.forEach((suit) => el.handRanksSuitCards.appendChild(buildHandRanksCard(null, suit)));
+  }
+
   function buildRulesIndex() {
     const activeId = state.lastGameTable?.gameChoiceId;
     el.rulesIndex.innerHTML = '';
@@ -1806,6 +1916,14 @@
 
   // NEW 4.4 §10.4: Same Game -- same startGame action as Options'
   // "Start" button, without reopening the Select/Options flow.
+  // NEW 12.5 (Part C, documentation only): confirmed real difference
+  // from re-picking the identical game via Select -- this calls
+  // startGame() directly and never touches gameChoiceId/gameOptions at
+  // all, so any Dealer customization from the hand just played carries
+  // over exactly as-is. Select, even for the same game, always calls
+  // setGameChoice() server-side, which unconditionally resets
+  // gameOptions to that preset's stored defaults -- see the comment at
+  // that reset line in gameTable.js for the fuller explanation.
   el.btnSameGame.addEventListener('click', () => {
     startGameWithStudWarning();
   });
@@ -2698,7 +2816,27 @@
     // the authoritative update hasn't landed from the server yet. The
     // source field's own change handler passes the just-committed raw
     // value directly instead of trusting the stale closure.
-    const sourceValue = sourceValueOverride !== undefined ? sourceValueOverride : (Number(gameTable.gameOptions[source.key]) || 0);
+    // FIXED 12.5 (Part B): a THIRD instance of the same stale-closure
+    // bug, missed by the two fixes above -- when this fires because
+    // Bet/Raise Limits was just switched to Fixed-Limit (not because
+    // the source field itself changed), sourceValueOverride is
+    // undefined, so this fell through to gameTable.gameOptions[
+    // source.key] -- the same stale snapshot. If the Dealer edits Ante
+    // while still on No-Limit, then switches to Fixed-Limit before that
+    // edit's own round-trip lands and triggers a fresh rebuild, the
+    // *display* still recomputes correctly (it always reads straight
+    // off the DOM), but the value actually SENT used the stale,
+    // pre-edit Ante -- confirmed live as "$4 on screen, $2 in play."
+    // Now reads the source field's own live DOM value directly in this
+    // case too, matching the two spots that were already fixed
+    // correctly.
+    let sourceValue;
+    if (sourceValueOverride !== undefined) {
+      sourceValue = sourceValueOverride;
+    } else {
+      const liveInput = el.optionsAntesFields.querySelector(`[data-option-key="${source.key}"]`);
+      sourceValue = liveInput ? Number(liveInput.value) || 0 : Number(gameTable.gameOptions[source.key]) || 0;
+    }
     send('setGameOption', { key: 'smallBet', value: sourceValue * source.smallMult });
     send('setGameOption', { key: 'bigBet', value: sourceValue * source.bigMult });
   }

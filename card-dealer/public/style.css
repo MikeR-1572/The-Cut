@@ -1425,18 +1425,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
      ("Deuce-to-Seven") plus the native dropdown arrow. */
   max-width: 160px;
 }
-/* FIXED 12.3 (found during implementation, not in the mockup
-   originally): native <select> dropdown option lists weren't
-   inheriting the dialog's dark background -- browsers often render the
-   popup list with its own default (usually white) background while
-   still applying the light text color, making unselected options
-   nearly invisible. Explicit background/color on <option> forces the
-   popup itself to match the felt/ivory scheme. Scoped to this dialog's
-   own selects specifically, not applied app-wide. */
-.option-field select option {
-  background: var(--felt-deep);
-  color: var(--ivory);
-}
+/* REMOVED 12.5 (Part D): .option-field select option deleted --
+   generalized app-wide instead, see the base `select` rule below.
+   Narrower now-redundant duplicate, no longer needed. */
 .option-field select:disabled,
 .option-field input:disabled {
   opacity: 0.5;
@@ -1485,6 +1476,22 @@ select {
   border-radius: var(--radius-s);
   border: 1px solid rgba(201, 163, 92, 0.35);
   background: rgba(0, 0, 0, 0.3);
+  color: var(--ivory);
+}
+/* FIXED 12.5 (Part D): generalized app-wide -- 12.3 found and fixed
+   this exact issue once already, but scoped narrowly to the Game
+   Options dialog's own selects (.option-field select option, now
+   removed as a redundant duplicate), on the reasoning that no other
+   select had been reported with the problem at the time. Confirmed
+   live on the Dealer's Rail "Select Opening Bettor" dropdown, flagged
+   as a general problem across the app, not unique to that one
+   control: the base `select` rule above already gives every dropdown's
+   CLOSED box the correct dark background/ivory text, but browsers
+   render the OPEN popup list with their own default (usually white)
+   background while still applying the inherited light text color --
+   nothing overrode that until now. */
+select option {
+  background: var(--felt-deep);
   color: var(--ivory);
 }
 
@@ -1585,6 +1592,11 @@ select {
    modals. Combined selector (specificity 0,2,0) wins over the shared
    440px base rule (0,1,0) regardless of stylesheet order. */
 .chip-dialog.options-dialog { width: min(620px, 92vw); }
+/* NEW 12.5 (Part E): same combined-selector pattern as .select-dialog/
+   .options-dialog above -- guaranteed override regardless of
+   stylesheet order, not the weaker cascade-order-only pattern
+   .rules-dialog (below) happens to rely on. */
+.chip-dialog.hand-ranks-dialog { width: min(820px, 92vw); }
 .chip-dialog h3 { font-size: 1.15rem; color: var(--brass-bright); margin-bottom: 12px; }
 
 /* NEW 9.6 (§10.4.2): every dialog's own <h3> title doubles as its
@@ -1665,6 +1677,92 @@ select {
   margin: 0 0 6px;
 }
 .rules-entry p { margin: 0; font-size: 0.85rem; line-height: 1.5; color: var(--ivory); white-space: pre-line; }
+
+/* ---------- Hand Ranks dialog (12.5, Part E) ---------- */
+
+.hand-ranks-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.hand-ranks-columns .hand-ranks-col {
+  padding: 0 16px;
+}
+.hand-ranks-columns .hand-ranks-col:first-child {
+  padding-left: 0;
+}
+.hand-ranks-columns .hand-ranks-col:not(:last-child) {
+  border-right: 1px solid rgba(201, 163, 92, 0.2);
+}
+.hand-ranks-columns .hand-ranks-col:last-child {
+  padding-right: 0;
+}
+.hand-ranks-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 2px;
+  border-bottom: 1px solid rgba(201, 163, 92, 0.14);
+}
+.hand-ranks-row:last-child { border-bottom: none; }
+.hand-ranks-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.hand-ranks-number {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--brass);
+}
+.hand-ranks-header h4 {
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ivory);
+  margin: 0;
+}
+.hand-ranks-cards {
+  display: flex;
+}
+.hand-ranks-suit-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(201, 163, 92, 0.25);
+}
+.hand-ranks-suit-section h4 {
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ivory);
+  margin: 0 0 6px;
+}
+/* NEW 12.5 (Part E.3): reuses the app's actual .card/.card-index/
+   .card-suit-glyph classes directly (the same approach already used to
+   scale the viewer's own larger hand, .seat.is-you .card) rather than
+   a separate card system -- just scoped smaller for this compact
+   reference list via a descendant selector, so nothing about the
+   normal in-game card rendering is touched. 39x56px, scaled down from
+   the base 48x68px card by the same ratio (0.8125x) applied to the
+   corner-index and suit-glyph font sizes too, so the mini card stays
+   proportioned rather than just shrinking with oversized text inside. */
+.hand-ranks-cards .card {
+  width: 39px;
+  height: 56px;
+  margin-left: -15px;
+}
+.hand-ranks-cards .card:first-child { margin-left: 0; }
+.hand-ranks-cards .card-index { font-size: 0.66rem; }
+.hand-ranks-cards .card-suit-glyph { font-size: 1.12rem; }
+/* Suit-Ranking cards omit the rank corners entirely (just the suit,
+   per the mockup) -- centers the glyph vertically since there's no
+   corner content competing for space. */
+.hand-ranks-cards .card--suit-only {
+  justify-content: center;
+}
+.hand-ranks-cards .card--suit-only .card-suit-glyph {
+  font-size: 1.4rem;
+}
 
 /* ---------- Select Game Choice modal (NEW 4.1) ---------- */
 

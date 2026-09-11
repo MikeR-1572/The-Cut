@@ -542,17 +542,13 @@
          12.2, so the ~20 other modals sharing .chip-dialog are
          unaffected. -->
     <dialog id="options-dialog" class="chip-dialog options-dialog">
-      <h3>Game Options</h3>
-      <!-- NEW 8.2 (§10.5): static header, above the editable fields --
-           found needed in 8.1 testing, since it's easy to forget which
-           preset is selected (and its rules) by the time Options is
-           reopened mid-session. Shown to every player who opens Options,
-           not just the Dealer. Doesn't change Options' own Start/Close,
-           editable/read-only behavior at all. -->
-      <div class="options-game-header">
-        <p class="options-game-name" id="options-game-name"></p>
-        <button type="button" class="btn btn-secondary btn-small" id="btn-options-rules" title="View this game's rules">Game Rules</button>
-      </div>
+      <!-- CHANGED 12.4 (Part A): "Game Options" and the active preset's
+           name now share one line -- were a separate <h3> plus a whole
+           .options-game-header block below it. Name styled ivory (was
+           brass) to read as content, not a second heading; "Game
+           Options" itself is unchanged brass, inherited from the shared
+           .chip-dialog h3 rule. -->
+      <h3>Game Options <span class="options-game-name" id="options-game-name"></span></h3>
       <!-- CHANGED 12.3 (Part B): the old single flat #game-options-list
            (one row per dealerOptions key, in whatever order the JSON
            happened to declare them) replaced with a fixed, sectioned
@@ -574,15 +570,28 @@
       </div>
       <div class="options-divider-row" id="options-lowhand-row"></div>
       <div class="options-divider-row" id="options-wildcard-row"></div>
-      <div class="dialog-actions">
-        <!-- NEW 10.4 (the-cut-spec_v10-4.md Part C): lets the Dealer back
-             out to game selection after opening Options -- previously the
-             only controls here were Start/Close and a Rules link, with no
-             way to change your mind about the picked game. Visible only
-             in the editable (Dealer, idle) state -- see
-             renderOptionsDialogFields()'s own logic. -->
-        <button type="button" class="btn btn-secondary" id="btn-options-cancel" title="Back to game selection">Cancel</button>
-        <button type="button" class="btn btn-primary" id="btn-options-confirm" title="Close">Close</button>
+      <!-- CHANGED 12.4 (Part A): Game Rules moved out of the old
+           top header, down here to the bottom-left of the button row --
+           scoped to its own .options-dialog-actions class rather than
+           the shared .dialog-actions (~20 other modals use that rule
+           and keep flex-end/right-aligned buttons only; this is the
+           only dialog that needs a left-aligned button alongside
+           Cancel/Start, and the only one missing a divider above the
+           row until now). No id changes -- #btn-options-rules/-cancel/
+           -confirm all kept exactly as before, so no client.js changes
+           were needed for this Part. -->
+      <div class="options-dialog-actions">
+        <button type="button" class="btn btn-secondary btn-small" id="btn-options-rules" title="View this game's rules">Game Rules</button>
+        <div class="options-dialog-actions-right">
+          <!-- NEW 10.4 (the-cut-spec_v10-4.md Part C): lets the Dealer back
+               out to game selection after opening Options -- previously the
+               only controls here were Start/Close and a Rules link, with no
+               way to change your mind about the picked game. Visible only
+               in the editable (Dealer, idle) state -- see
+               renderOptionsDialogFields()'s own logic. -->
+          <button type="button" class="btn btn-secondary" id="btn-options-cancel" title="Back to game selection">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btn-options-confirm" title="Close">Close</button>
+        </div>
       </div>
     </dialog>
 

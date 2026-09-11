@@ -2563,7 +2563,29 @@
       }
       input.addEventListener('change', () => {
         hideTableError();
-        const raw = input.value;
+        let raw = input.value;
+        // NEW 12.4 (Part D): min/max HTML attributes were never real
+        // enforcement -- browsers only use them for the spinner arrows
+        // and an :invalid CSS hook. Nothing else was checking a typed
+        // or pasted value before it got sent, so out-of-range numbers
+        // (confirmed live: negative values) reached the server
+        // silently for every constrained field except Raise Cap, which
+        // happens to also have separate server-side validation.
+        // Clamped here on commit (change -- blur/Enter), not on every
+        // keystroke, so a Dealer isn't fighting a live correction
+        // mid-type. The displayed value is corrected to match whatever
+        // actually gets sent, so typing -3 resolves to the real
+        // minimum the moment it's committed, rather than the display
+        // and the server's stored value silently disagreeing.
+        if (OPTION_NUMBER_CONSTRAINTS[key] && input.type === 'number' && raw !== '') {
+          const c = OPTION_NUMBER_CONSTRAINTS[key];
+          let n = Number(raw);
+          if (Number.isNaN(n)) n = c.min ?? 0;
+          if (c.min !== undefined) n = Math.max(c.min, n);
+          if (c.max !== undefined) n = Math.min(c.max, n);
+          raw = String(n);
+          input.value = raw;
+        }
         const sendValue = Array.isArray(value) ? raw.split(',').map((s) => s.trim()).filter(Boolean) : raw;
         send('setGameOption', { key, value: sendValue });
         if (opts.onCommitAlso) opts.onCommitAlso(sendValue);

@@ -1,4 +1,70 @@
-# The Cut — Card Dealing & Betting Engine (v12.3)
+# The Cut — Card Dealing & Betting Engine (v12.4)
+
+**Game Options Dialog Follow-Ups** — built from `the-cut-spec_v12-4.md`,
+consolidating 12.3 play-testing findings. Still no `game-choices.json`
+changes. `npm test` — **448 tests** (unchanged — this release is
+layout/CSS plus one client-side validation fix; nothing new at the
+`GameTable` level to unit-test).
+
+### Part A — Header restructure
+
+"Game Options" and the active preset's name now share one `<h3>` line
+(name styled `var(--ivory)`, was a separate brass `<p>` in its own
+`.options-game-header` block, now removed entirely — confirmed no
+other consumer before deleting it). Game Rules moved out of the header
+down to the bottom-left of the button row, in a new
+`.options-dialog-actions` class rather than the shared `.dialog-actions`
+(~20 other modals use that rule, all right-aligned only) — the same
+new class also adds the divider line above the row that was missing
+entirely. No `client.js` changes needed — `#btn-options-rules`/
+`-cancel`/`-confirm` all kept their ids, just moved in the DOM.
+
+### Part B — Label/field overlap
+
+`.option-field`'s label column: 68px, `white-space: nowrap` → 90px,
+wraps onto a second line instead. Confirmed live: "Extra Card Dealt"
+(17 characters) was spilling into the field beside it; a single fixed
+width wide enough for every current label (~115–120px) would just
+oversize the column for the common short-label case, so this fixes
+the general case (anything too long wraps) rather than chasing
+today's specific longest string.
+
+### Part C — Dropdown width
+
+`.option-field select`: `max-width: 160px` added — number inputs were
+already capped (12.3's own Part B, 56px), selects had no equivalent
+and stretched to fill an entire wide column for two words. 160px
+comfortably fits the longest real option text ("Deuce-to-Seven") plus
+the native arrow.
+
+### Part D — Numeric fields accepted out-of-range values (a real bug, not a build mistake)
+
+Confirmed against the code: 12.3's `min`/`max` HTML attributes were
+being set correctly the whole time — they just were never real
+enforcement. Browsers only use them for the spinner arrows and an
+`:invalid` CSS hook; nothing else checked a typed or pasted value
+before it got sent. Raise Cap happened to also have server-side
+validation (`gameTable.js` rejects an invalid value outright), so its
+own gap was masked; Max Discards, Ante Amount, Small Blind, and Big
+Blind had no equivalent backstop and went through silently.
+
+Fixed with a clamp on the field's own `change` event (commit —
+blur/Enter, not every keystroke, so a Dealer isn't fighting a live
+correction mid-type), exactly matching the spec's own algorithm.
+Verified in isolation against nine representative cases (negative,
+over-max, valid, empty, non-numeric, and an unconstrained field left
+untouched) before trusting it. **Confirmed transitively covers the
+computed Small Bet/Big Bet push too**, without needing its own entry
+in `OPTION_NUMBER_CONSTRAINTS`: the source field's `onCommitAlso`
+receives the already-clamped value (`sendValue`, computed *after* the
+clamp runs), so `pushComputedBets()` never sees an out-of-range Ante/
+Bring In/Big Blind in the first place. Server-side Raise Cap
+validation untouched — this is a client-side stop-gap in front of the
+normal send, the existing server check remains as the real backstop.
+
+---
+
+## v12.3 — Game Options Dialog Redesign
 
 **Game Options Dialog Redesign** — built from `the-cut-spec_v12-3.md`.
 Like 12.2, this originated in Dev chat against an interactive mockup

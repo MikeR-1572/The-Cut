@@ -1293,25 +1293,17 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
 
 /* ---------- Game Choice / options editor (v4.0) ---------- */
 
-/* NEW 8.2 (§10.5): static header above the editable option fields --
-   Game Name (plain display, reflects whatever preset is active) + a
-   Game Rules trigger, opening the same modal the Game Rail's own
-   button already opens. */
-.options-game-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 10px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid rgba(201, 163, 92, 0.25);
-}
+/* REMOVED 12.4 (Part A): .options-game-header deleted -- Game Options
+   and the preset name now share one <h3>, Game Rules moved to the
+   bottom button row. Confirmed no other consumer of this class before
+   removal. */
 .options-game-name {
-  font-family: var(--font-display);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--brass-bright);
-  margin: 0;
+  /* CHANGED 12.4 (Part A): was a standalone <p> with its own font-
+     family/size/weight/margin (brass) -- now inline inside the shared
+     <h3>, inheriting everything from .chip-dialog h3 except color,
+     which is overridden to ivory so it reads as content, not a second
+     heading. */
+  color: var(--ivory);
 }
 
 /* REMOVED 12.3 (Part B): .game-options-list, .fixed-limit-bets-display,
@@ -1382,7 +1374,15 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
    (more room, longer labels like "Bet / Raise Limits"). */
 .option-field {
   display: grid;
-  grid-template-columns: 68px 1fr;
+  /* CHANGED 12.4 (Part B): 68px -> 90px -- fixed a real label/field
+     overlap (worst: "Extra Card Dealt," 17 characters, spilling into
+     the field beside it). 90px isn't wide enough to fit every label on
+     one line by itself (that would need ~115-120px, oversized for the
+     common short-label case) -- paired with removing white-space:
+     nowrap below, so anything still too long wraps onto a second line
+     instead of overlapping, robust against label length generally
+     rather than tuned to today's specific longest string. */
+  grid-template-columns: 90px 1fr;
   column-gap: 6px;
   align-items: center;
 }
@@ -1393,7 +1393,8 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--ivory);
-  white-space: nowrap;
+  /* REMOVED 12.4 (Part B): white-space: nowrap -- was the actual root
+     cause of the overlap (see .option-field's own comment above). */
 }
 .option-field select,
 .option-field input {
@@ -1416,6 +1417,13 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
 .option-field select {
   font-family: var(--font-body);
   font-size: 0.72rem;
+  /* NEW 12.4 (Part C): number inputs were already capped (max-width:
+     56px, 12.3's own Part B); selects had no equivalent, inheriting
+     the shared width: 100% with nothing bounding it further --
+     stretched to fill an entire wide column for two words. 160px is
+     comfortable room for the longest real option text
+     ("Deuce-to-Seven") plus the native dropdown arrow. */
+  max-width: 160px;
 }
 /* FIXED 12.3 (found during implementation, not in the mockup
    originally): native <select> dropdown option lists weren't
@@ -1609,6 +1617,25 @@ select {
   margin-top: 6px;
 }
 .dialog-actions--stack button { width: 100%; }
+
+/* NEW 12.4 (Part A): Game Options' own button row -- scoped separately
+   from the shared .dialog-actions (~20 other modals use that rule,
+   all right-aligned only) since this is the only dialog needing a
+   left-aligned button (Game Rules) alongside Cancel/Start, and the
+   only one that was missing a divider line above the row entirely. */
+.options-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(201, 163, 92, 0.2);
+}
+.options-dialog-actions-right {
+  display: flex;
+  gap: 10px;
+}
 
 /* ---------- Game Rules modal (v4.0) ---------- */
 

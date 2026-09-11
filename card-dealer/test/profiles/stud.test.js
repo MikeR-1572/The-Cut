@@ -523,7 +523,13 @@ test('newHand: rejected mid-hand for every other Stud preset (no hasKillCard, no
 test('deal-interrupt: a Free price auto-resolves inline, deal completes in one call, no pause', () => {
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
-  room.setGameChoice('p1', 'stud-7card-baseball'); // priceForThrees: 'free' by default
+  room.setGameChoice('p1', 'stud-7card-baseball');
+  // NEW 12.3: pinned explicitly -- this test is about Free-price
+  // auto-resolve behavior specifically, not about the preset's current
+  // default (which changed from 'free' to 'pot' under Part E). Found
+  // by actually running the suite against the corrected
+  // game-choices.json, not called out in the spec's own list of three.
+  room.gameOptions.priceForThrees = 'free';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   stackDeckTop(room, [{ suit: 'hearts', rank: '8' }, { suit: 'clubs', rank: '9' }, { suit: 'spades', rank: '3' }], ['3', '4']);
@@ -539,7 +545,7 @@ test('deal-interrupt: a non-Free price pauses the deal exactly at the triggering
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForFours = 'smallBet';
+  room.gameOptions.priceForFours = 'bringInX2';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   stackDeckTop(room, [{ suit: 'hearts', rank: '8' }, { suit: 'clubs', rank: '9' }, { suit: 'spades', rank: '4' }], ['3', '4']);
@@ -555,7 +561,7 @@ test('deal-interrupt: a face-DOWN 3/4 never triggers a pause at all', () => {
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForThrees = 'smallBet'; // would pause if face-up
+  room.gameOptions.priceForThrees = 'bringInX2'; // would pause if face-up
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   // 7-Card pattern: down, down, up, up, up, up, down -- position 0 is
@@ -584,7 +590,7 @@ test('payDealInterrupt: pays the priced amount straight into the pot, resumes an
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForThrees = 'smallBet'; // 2
+  room.gameOptions.priceForThrees = 'bringInX2'; // bringIn (1) x2 = 2
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   stackDeckTop(room, [{ suit: 'hearts', rank: '8' }, { suit: 'clubs', rank: '9' }, { suit: 'spades', rank: '3' }], ['3', '4']);
@@ -605,7 +611,7 @@ test('payDealInterrupt: rejected for the wrong player, or when the pending trigg
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForFours = 'smallBet';
+  room.gameOptions.priceForFours = 'bringInX2';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   stackDeckTop(room, [{ suit: 'hearts', rank: '8' }, { suit: 'clubs', rank: '9' }, { suit: 'spades', rank: '4' }], ['3', '4']);
@@ -618,7 +624,7 @@ test('buyDealInterrupt: pays, deals exactly one extra card per extraCardUpOrDown
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForFours = 'bigBet'; // 4
+  room.gameOptions.priceForFours = 'bringInX4'; // bringIn (1) x4 = 4
   room.gameOptions.extraCardUpOrDown = 'down';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
@@ -639,7 +645,7 @@ test('buyDealInterrupt: bought card doesn\'t advance street numbering -- the ext
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForFours = 'bigBet';
+  room.gameOptions.priceForFours = 'bringInX4';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   stackDeckTop(room, [{ suit: 'hearts', rank: '8' }, { suit: 'clubs', rank: '9' }, { suit: 'spades', rank: '4' }], ['3', '4']);
@@ -652,7 +658,7 @@ test('declineDealInterrupt: no payment, no extra card, not a fold -- resumes and
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForFours = 'bigBet';
+  room.gameOptions.priceForFours = 'bringInX4';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   stackDeckTop(room, [{ suit: 'hearts', rank: '8' }, { suit: 'clubs', rank: '9' }, { suit: 'spades', rank: '4' }], ['3', '4']);
@@ -672,7 +678,7 @@ test('declineDealInterrupt: rejected for a pending 3 (Pay/Fold is that pair, not
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForThrees = 'smallBet';
+  room.gameOptions.priceForThrees = 'bringInX2';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   stackDeckTop(room, [{ suit: 'hearts', rank: '8' }, { suit: 'clubs', rank: '9' }, { suit: 'spades', rank: '3' }], ['3', '4']);
@@ -684,7 +690,7 @@ test('fold during a deal-interrupt: the Baseball-specific bypass -- resolves the
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForThrees = 'smallBet';
+  room.gameOptions.priceForThrees = 'bringInX2';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   stackDeckTop(room, [{ suit: 'hearts', rank: '8' }, { suit: 'clubs', rank: '9' }, { suit: 'spades', rank: '3' }], ['3', '4']);
@@ -701,8 +707,8 @@ test('deal-interrupt: multiple triggers on the same street resolve strictly in d
   const room = tableWithPlayers('Alice', 'Bob', 'Carl');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForThrees = 'smallBet';
-  room.gameOptions.priceForFours = 'bigBet';
+  room.gameOptions.priceForThrees = 'bringInX2';
+  room.gameOptions.priceForFours = 'bringInX4';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
   // 3 recipients x 3 cards = 9 pops, dealt p1,p1,p1,p2,p2,p2,p3,p3,p3 in
@@ -833,7 +839,19 @@ test('Baseball: a player who bought an extra card still gets every later street 
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForFours = 'bigBet'; // force a real pause, not an auto-resolved Free
+  room.gameOptions.priceForFours = 'bringInX4'; // force a real pause, not an auto-resolved Free
+  // NEW 12.3: pinned explicitly -- this test rigs only rank '4' via
+  // stackDeck's ranksToClear, leaving natural 3s in the deck across
+  // several later streets (closeAndDeal is called four more times
+  // below). Baseball's new default priceForThrees is 'pot' (Part E),
+  // no longer 'free' -- a stray, un-rigged natural 3 landing face-up
+  // on any of those streets would now genuinely pause the deal instead
+  // of being harmless, silently shorting the hand for the rest of this
+  // test. Confirmed empirically: intermittently flaky (~1 in 3-5 runs)
+  // before this pin, 30+ consecutive clean runs after. Same pattern
+  // already used once for a related flakiness case in 8.3 (see the
+  // fully-controlled-deck comment further down this file).
+  room.gameOptions.priceForThrees = 'free';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
 
@@ -929,8 +947,13 @@ test('Baseball chaining: a bought extra card that is itself a face-up 4 pauses a
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball');
-  room.gameOptions.priceForFours = 'bigBet'; // not free -- forces a real pause both times
+  room.gameOptions.priceForFours = 'bringInX4'; // not free -- forces a real pause both times
   room.gameOptions.extraCardUpOrDown = 'up'; // so the bought card can actually chain
+  // NEW 12.3: pinned explicitly, same reasoning as the test above --
+  // only rank '4' is rigged out of the deck; a stray natural 3 landing
+  // face-up would now genuinely pause under the new 'pot' default
+  // instead of being harmless.
+  room.gameOptions.priceForThrees = 'free';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
 
@@ -962,7 +985,13 @@ test('Baseball chaining: a bought extra card dealt FACE-DOWN (the preset default
   const room = tableWithPlayers('Alice', 'Bob');
   for (const p of room.players) room.buyChips(p.id, 1000);
   room.setGameChoice('p1', 'stud-7card-baseball'); // extraCardUpOrDown defaults to 'down'
-  room.gameOptions.priceForFours = 'bigBet';
+  room.gameOptions.priceForFours = 'bringInX4';
+  // NEW 12.3: pinned explicitly, same reasoning as the two tests above
+  // -- only rank '4' is rigged out; p2's three initial cards are dealt
+  // from the natural remaining deck once the queue resumes after
+  // buyDealInterrupt, and a stray natural 3 among them would now
+  // genuinely pause under the new 'pot' default.
+  room.gameOptions.priceForThrees = 'free';
   room.startGame('p1');
   for (const p of room.players) if (p.oweAnte > 0) room.postAnteBlind(p.id);
 

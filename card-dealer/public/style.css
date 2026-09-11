@@ -1314,36 +1314,146 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   margin: 0;
 }
 
-.game-options-list {
+/* REMOVED 12.3 (Part B): .game-options-list, .fixed-limit-bets-display,
+   .game-option-row, .game-option-key deleted along with their markup --
+   renderOptionsDialogFields() no longer builds a flat per-key list at
+   all; see the sectioned grid rules below instead. Confirmed via
+   direct search across public/ and test/ before removal: nothing else
+   referenced any of these four classes. */
+
+/* ---------- Game Options dialog: sectioned grid layout (12.3) ---------- */
+
+.options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.options-col {
+  padding: 0 14px;
+}
+.options-col:first-child {
+  padding-left: 0;
+}
+.options-col:last-child {
+  padding-right: 0;
+  border-left: 1px solid rgba(201, 163, 92, 0.25);
+}
+.options-section-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ivory-dim);
+  text-align: center;
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(201, 163, 92, 0.2);
+}
+.options-field-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
-/* NEW 9.2 (§6.10): read-only Small Bet/Big Bet figures, Fixed-Limit only */
-.fixed-limit-bets-display {
-  font-size: 0.82rem;
-  color: var(--ivory-dim);
-  margin: 8px 0 0;
-  padding-top: 8px;
-  border-top: 1px solid rgba(201, 163, 92, 0.2);
-}
-.game-option-row {
+.options-field-grid {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+}
+.options-divider-row {
+  border-top: 1px solid rgba(201, 163, 92, 0.25);
+  margin-top: 12px;
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.options-divider-row:empty {
+  display: none;
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+/* CHANGED 12.3 (Part B): every option field is its own 2-column grid
+   (label, field) so every label/field pair in a section lines up at
+   the same x-position regardless of label length -- a plain inline
+   row (label immediately followed by field) was tried and rejected
+   during the mockup iteration for exactly this reason. Two width
+   variants: narrow (68px label column) for the 2-up Antes/Blinds and
+   Baseball wild-card grids (short labels, tight columns), wide (150px)
+   for the single-column Limits/Low-Hand-Rules/Dealer's-Audible rows
+   (more room, longer labels like "Bet / Raise Limits"). */
+.option-field {
+  display: grid;
+  grid-template-columns: 68px 1fr;
+  column-gap: 6px;
   align-items: center;
-  gap: 6px;
 }
-.game-option-key {
+.option-field.option-field--wide {
+  grid-template-columns: 150px 1fr;
+}
+.option-field label {
   font-size: 0.72rem;
-  color: var(--ivory-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--ivory);
+  white-space: nowrap;
 }
-.game-option-row input,
-.game-option-row select {
+.option-field select,
+.option-field input {
+  background: transparent;
+  border: 1px solid var(--brass);
+  color: var(--ivory);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 4px 6px;
+  border-radius: var(--radius-s);
   width: 100%;
-  padding: 6px 8px;
-  font-size: 0.82rem;
+  box-sizing: border-box;
+}
+/* Dollar-amount number fields never need more than 2-3 digits --
+   capped narrow regardless of the grid cell's own width, confirmed
+   during the mockup iteration as looking oversized otherwise. */
+.option-field input[type="number"] {
+  max-width: 56px;
+}
+.option-field select {
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+}
+/* FIXED 12.3 (found during implementation, not in the mockup
+   originally): native <select> dropdown option lists weren't
+   inheriting the dialog's dark background -- browsers often render the
+   popup list with its own default (usually white) background while
+   still applying the light text color, making unselected options
+   nearly invisible. Explicit background/color on <option> forces the
+   popup itself to match the felt/ivory scheme. Scoped to this dialog's
+   own selects specifically, not applied app-wide. */
+.option-field select option {
+  background: var(--felt-deep);
+  color: var(--ivory);
+}
+.option-field select:disabled,
+.option-field input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* A reserved-but-invisible field -- keeps its row/column's layout
+   space so surrounding fields don't reflow when a field doesn't apply
+   to the current game or current option values (e.g. Max Raises Per
+   Round under No-Limit) -- Part B's explicit requirement that Ante and
+   Bring In always land directly above each other regardless of what
+   else is showing. */
+.option-field--placeholder {
+  visibility: hidden;
+}
+/* Illustrative description shown beneath Low Hand Rules once a value
+   is selected, updating live as the Dealer changes the dropdown --
+   placed as a second grid row within the same .option-field, under
+   the dropdown itself (column 2), not under the label. */
+.options-field-description {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 2px 0 0;
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--ivory-dim);
 }
 
 #deal-target-count,
@@ -1461,6 +1571,12 @@ select {
    .chip-dialog on #select-dialog only (specificity 0,2,0 beats the
    base rule's 0,1,0 regardless of stylesheet order). */
 .chip-dialog.select-dialog { width: min(560px, 90vw); }
+/* NEW 12.3 (Part B): same pattern as .select-dialog above -- Game
+   Options needs to be wider (620px) for the new sectioned grid layout
+   without heavy wrapping, but .chip-dialog is shared by ~20 other
+   modals. Combined selector (specificity 0,2,0) wins over the shared
+   440px base rule (0,1,0) regardless of stylesheet order. */
+.chip-dialog.options-dialog { width: min(620px, 92vw); }
 .chip-dialog h3 { font-size: 1.15rem; color: var(--brass-bright); margin-bottom: 12px; }
 
 /* NEW 9.6 (§10.4.2): every dialog's own <h3> title doubles as its

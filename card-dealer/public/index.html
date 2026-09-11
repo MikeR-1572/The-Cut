@@ -535,7 +535,13 @@
 
     <!-- ---- Options modal: visible to everyone, editable by the Dealer only.
          CHANGED 4.4: hint text removed, fields use human-readable labels (§10.5) ---- -->
-    <dialog id="options-dialog" class="chip-dialog">
+    <!-- CHANGED 12.3 (the-cut-spec_v12-3.md Part G): options-dialog class
+         added alongside chip-dialog so only this modal gets the wider
+         620px width -- see .chip-dialog.options-dialog in style.css.
+         Same pattern Select Game's own .select-dialog established in
+         12.2, so the ~20 other modals sharing .chip-dialog are
+         unaffected. -->
+    <dialog id="options-dialog" class="chip-dialog options-dialog">
       <h3>Game Options</h3>
       <!-- NEW 8.2 (§10.5): static header, above the editable fields --
            found needed in 8.1 testing, since it's easy to forget which
@@ -547,11 +553,27 @@
         <p class="options-game-name" id="options-game-name"></p>
         <button type="button" class="btn btn-secondary btn-small" id="btn-options-rules" title="View this game's rules">Game Rules</button>
       </div>
-      <div class="game-options-list" id="game-options-list"></div>
-      <!-- NEW 9.2 (§6.10): read-only, shown only under Fixed-Limit --
-           live-recomputed from smallBlind/bigBlind, never independently
-           editable. -->
-      <p class="fixed-limit-bets-display" id="fixed-limit-bets-display" hidden></p>
+      <!-- CHANGED 12.3 (Part B): the old single flat #game-options-list
+           (one row per dealerOptions key, in whatever order the JSON
+           happened to declare them) replaced with a fixed, sectioned
+           grid layout -- see renderOptionsDialogFields() in client.js
+           for the actual field-building logic. The old
+           #fixed-limit-bets-display readout is gone entirely -- Small
+           Bet/Big Bet now get their own live, read-only slots directly
+           inside #options-antes-fields for every profile, not just
+           Hold'em, so a separate summary line would just be redundant. -->
+      <div class="options-grid">
+        <div class="options-col">
+          <p class="options-section-title">Limits</p>
+          <div class="options-field-list" id="options-limits-fields"></div>
+        </div>
+        <div class="options-col">
+          <p class="options-section-title" id="options-antes-title">Antes &amp; Bets</p>
+          <div class="options-field-grid" id="options-antes-fields"></div>
+        </div>
+      </div>
+      <div class="options-divider-row" id="options-lowhand-row"></div>
+      <div class="options-divider-row" id="options-wildcard-row"></div>
       <div class="dialog-actions">
         <!-- NEW 10.4 (the-cut-spec_v10-4.md Part C): lets the Dealer back
              out to game selection after opening Options -- previously the

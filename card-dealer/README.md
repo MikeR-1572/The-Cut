@@ -1,17 +1,180 @@
-# The Cut — Card Dealing & Betting Engine (v12.2)
+# The Cut — Card Dealing & Betting Engine (v12.3)
 
-**Select Game Dialog Redesign** — built from `the-cut-spec_v12-2.md`.
-Unlike 12.0/12.1, this one didn't originate as written spec text — it
-was worked out directly with Mike in Dev chat the night before,
-iterating live against an interactive mockup
-(`game-selection-mockup-v2.html`, starting point
-`Game_Selection_Menu.pdf`), then written up
-(`select-game-redesign-handoff.md`) for Spec Chat to turn into
-`the-cut-spec_v12-2.md`. Still cosmetic-only/low-risk — purely
-client-side rendering, no `GameTable`/server logic touched, same
-category as 12.0/12.1. `npm test` — **448 tests** (unchanged — this
-release only touches `buildSelectIndex()` and its CSS; nothing new at
-the `GameTable` level to unit-test).
+**Game Options Dialog Redesign** — built from `the-cut-spec_v12-3.md`.
+Like 12.2, this originated in Dev chat against an interactive mockup
+(`game-options-mockup-v1.html`, starting point `Game_Options_Diaglog.pdf`)
+rather than written spec text. **Unlike every other 12.x release, this
+one is not cosmetic-only** — two genuine gameplay-logic touchpoints
+were found and resolved before building (see Parts C and E below).
+`npm test` — **448 tests**, run 130+ consecutive times clean against
+the final build (see Part E's own flakiness story below for why that
+mattered here specifically, not just as routine diligence).
+
+### Part A — Field visibility: per-game AND per-option-value
+
+`renderOptionsDialogFields()` already showed only a preset's actual
+`dealerOptions` keys. New: fields also hide based on another field's
+*current value* — Max Raises Per Round hides entirely under No-Limit
+(was visible-but-disabled, showing "No Cap"); Small Bet/Big Bet hide
+entirely unless Bet/Raise Limits is Fixed-Limit (previously always
+shown/editable regardless of structure). Max Discards (5-Card Draw
+only — not in either page of the original PDF reference, surfaced
+only because the mockup was built from real `dealerOptions` data)
+sits in Limits, above Bet/Raise Limits, Draw only, no reserved gap on
+other games.
+
+### Part B — Layout: fixed grid slots, not a flowing list
+
+Two fixed columns: **Limits** (Max Discards → Bet/Raise Limits → Max
+Raises Per Round, reserved-gap under No-Limit) and **Antes & Bets**/
+**Blinds & Bets** — a fixed 2×2 grid, always the same order (Ante/
+Small-Blind, Small Bet, Bring-In/Big-Blind, Big Bet), `visibility:
+hidden` standing in for any slot that doesn't apply so Ante and Bring
+In always land directly above each other regardless of what else is
+showing. Every field is its own 2-column grid (label, field) — narrow
+(68px label) for the 2-up grids, wide (150px) for the single-column
+rows. Dollar amounts capped at `max-width: 56px`. The Baseball
+wild-card block is a single 2-column grid in the PDF's own row order,
+not two side-by-side 2-up grids (rejected during mockup iteration as
+reading like 4 columns across). Native `<select>` dropdown contrast
+fixed (found during implementation — browsers often keep the popup
+list's own default white background regardless of the closed
+control's styling). Widened to `min(620px, 92vw)`, scoped to a new
+`.options-dialog` class combined with `.chip-dialog`, same pattern
+`.select-dialog` established in 12.2 — the shared base class is used
+by ~20 other modals, confirmed directly before touching it.
+
+**Namespacing note**: every new CSS class uses an `option-`/`options-`
+prefix (`.option-field`, `.options-field-grid`, etc.) after finding a
+real collision — `.field` already exists app-wide for the lobby's own
+login forms, with different styling entirely; reusing it would have
+silently broken those.
+
+### Part C — Small Bet / Big Bet: the one real gameplay-logic change, and why it's scoped the way it is
+
+**What the mockup/handoff originally proposed, and why it didn't
+ship**: computed/read-only for all three game kinds, with
+`game-choices.json` nulling Draw/Stud's `smallBet`/`bigBet` to match
+Hold'em's own pattern. **Caught before building**: `gameTable.js`
+reads `gameOptions.smallBet`/`bigBet` directly, server-side, to size
+every real Fixed-Limit bet (`_fixedLimitSize()`) — nulling the
+preset's own default would have meant every Fixed-Limit bet in Draw
+and Stud resolving to $0 the moment this shipped.
+
+**Decided workaround**: the fields stay real, storable `dealerOptions`
+values (the null-ing reverted) — rendered `readOnly`, kept correct by
+the app itself instead of the Dealer. Whenever the actual source field
+(Ante for Draw, Bring In for Stud) commits (`change`, not every
+keystroke), the app explicitly resends `setGameOption` for both —
+also re-sent the moment Bet/Raise Limits switches *into* Fixed-Limit,
+in case the source changed while hidden. The visible number still
+updates live on every keystroke (`input` event) for feedback; only the
+actual server message waits for commit. **Net result: zero
+`gameTable.js` changes for this part** — `_fixedLimitSize()` never
+knows the number now originates from the app instead of a person, and
+neither does the betting rail's own separate client-side mirror of
+that same function (a second real consumer confirmed unaffected by
+tracing every reference, not assumed).
+
+**Two closure-staleness bugs caught and fixed during a manual trace,
+not by the initial implementation pass**: `gameTable` inside these
+handlers is captured whenever the dialog was last rendered — reading
+`gameTable.gameOptions.bettingStructure` or `gameTable.gameOptions[
+sourceKey]` immediately after the Dealer's own edit returns the
+*pre-edit* value, since the authoritative update only lands on the
+next broadcast. Both `refreshOptionsConditionalFields()` and
+`pushComputedBets()` take an explicit override parameter now, fed the
+just-committed value directly from the field's own change handler,
+rather than trusting the stale closure — without this, Small Bet/Big
+Bet would have silently failed to resend at exactly the "switching
+into Fixed-Limit" moment the spec calls out as needing it.
+
+Computed fields use stable ids (`live-small-bet`/`live-big-bet`
+equivalents) patched in place — a naive full-rebuild-on-every-keystroke
+would destroy and recreate the source input mid-type, stealing focus.
+
+### Part D — Numeric field constraints
+
+Plain `min`/`max` HTML attributes: Max Discards (3–5), Max Raises Per
+Round (min 1), Ante/Bring In/Small Blind/Big Blind (min 0).
+
+### Part E — Baseball's Price for a 3/4: new value list, and the second real gameplay change
+
+**New list**: Pot / Ante / Bring In / Bring In x2 / Bring In x4 / Free
+— the old list (Small Bet/Big Bet-based) could reference a value that
+might not even exist under Part A/C's own conditional hiding. New
+defaults, both Baseball entries: Price for a 3 → Pot, Price for a 4 →
+Bring In x2 (the real stored `priceForFours` was `"bigBet"` before
+this change — not valid under the new list at all).
+
+**This one genuinely touches `gameTable.js`, unavoidably**: unlike
+Small Bet/Big Bet, this isn't a number computed once — it's a
+*reference* the server resolves live, at the moment someone actually
+pays it during a real Baseball hand (`payDealInterrupt`/
+`buyDealInterrupt`). `_resolvePriceAmount()` only understood the old
+enum; `"bringInX2"` would have fallen through to `default: return 0`,
+silently charging $0 for a real card purchase. Fixed, both the server
+copy and `client.js`'s own mirror (which also feeds the affected
+player's live Pay/Buy decision dialog via `describePrice()` — a
+real, separate player-facing surface the original spec draft didn't
+name explicitly; found by tracing every actual consumer before writing
+any code, not by following the spec's own code sample alone).
+`ENUM_OPTION_VALUES`/`PRICE_DISPLAY_LABELS` (the dropdown's own option
+list and display labels) updated to match — also not explicitly named
+in the original spec draft, same reason.
+
+**Test fixtures**: `test/profiles/stud.test.js` had 15 hardcoded uses
+of the old enum, updated to resolve to identical dollar amounts
+against `stud-7card-baseball`'s real data (Bring In = 1, so
+`bringInX2` = `bigBet`'s old value of 2, `bringInX4` = 4).
+
+**The flakiness story, worth telling in full**: the spec's own draft
+named three tests needing `priceForThrees` pinned to `'free'` (they
+rig only rank '4' out of the deck via `ranksToClear`, relying on the
+old Free default to make a stray natural 3 harmless). A fourth
+surfaced only by actually running the suite against the corrected
+`game-choices.json` — "a Free price auto-resolves inline" relied on
+the *comment* "priceForThrees: 'free' by default" rather than an
+explicit pin, and broke the instant the real default became `'pot'`.
+Verification didn't stop at "the suite passes once": an initial
+80-run clean streak turned out to be against a stale copy of
+`game-choices.json` that had never actually been copied into the
+build (still `'free'`, pre-Part-E) — caught by an adversarial check
+(intentionally stripping the fix and expecting failures, per this
+project's own standing discipline) that unexpectedly found *zero*
+failures instead of the expected ones. Once the real file was in
+place, the same adversarial strip produced a 44% failure rate — far
+higher than the spec's own "1 in 3–5" estimate, confirming the fix was
+both correct and considerably more necessary than described. Final
+state: 448/448, confirmed clean across 130+ consecutive full-suite
+runs, plus a clean adversarial re-strip/re-fix cycle on the corrected
+data specifically.
+
+### Part F — Low Hand Rules: a live description
+
+Shown beneath the dropdown, updating live. Confirmed this can't live
+in `game-choices.json` (that file only ever records which *one* value
+a preset uses, never the shared option list or descriptive text) —
+lives in `client.js` alongside the existing option list instead.
+Finalized wording (Mike-confirmed, not placeholder): Ace-to-Five
+("Aces are always low; straights and flushes don't count against a
+low hand"), Deuce-to-Seven ("Aces are always high; straights and
+flushes do count against a low hand"), Stud 8 ("Must have five cards
+8 or lower (no pairs), to qualify for low half of pot").
+
+### Part G — `game-choices.json`: final state
+
+Mike's own `displayName` shortenings (11 entries, e.g. "7-Card Stud —
+Baseball" → "Baseball", to fit 12.2's compact grid buttons) preserved
+verbatim. `smallBet`/`bigBet` reverted to their real pre-existing
+numeric values for all 13 Draw/Stud entries — not nulled, per Part
+C's workaround. Baseball/Baseball Hi/Lo: `priceForThrees` → `"pot"`,
+`priceForFours` → `"bringInX2"`. Confirmed field-by-field: nothing
+else in the file changed.
+
+---
+
+## v12.2 — Select Game Dialog Redesign
 
 ### Part A — Three groups → four: Stud split out
 

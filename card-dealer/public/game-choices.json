@@ -25,7 +25,7 @@
   },
   {
     "id": "draw-5card-jacks",
-    "displayName": "5-Card Draw - Jacks or Better",
+    "displayName": "Jacks or Better",
     "profile": "draw",
     "reAnteable": true,
     "advanceTurnRequired": false,
@@ -49,7 +49,7 @@
   },
   {
     "id": "draw-5card-jacks-trips",
-    "displayName": "5-Card Draw — Jacks or Better, Trips to Win",
+    "displayName": "Jacks or Better, Trips to Win",
     "profile": "draw",
     "reAnteable": true,
     "advanceTurnRequired": false,
@@ -133,7 +133,7 @@
   },
   {
     "id": "stud-7card-razz",
-    "displayName": "7-Card Stud — Razz",
+    "displayName": "Razz (Low Hand Wins)",
     "profile": "stud",
     "description": "(7CS) Razz - Low Hand Wins!",
     "rules": "7-Card Stud Lowball (Variant)\n\nLOWEST HAND WINS!\n\nRules for Low Hand is a Dealer Option.\n\nOn 3rd Street, highest card makes the Bring-In bet.\n\nOn 4th – 7th Street, lowest cards showing opens the betting.\n\nSuit Ranking: Clubs < Diamonds < Hearts < Spades",
@@ -165,7 +165,7 @@
   },
   {
     "id": "stud-7card-stud8",
-    "displayName": "7-Card Stud — Hi/Lo (Stud 8 or Better)",
+    "displayName": "Stud 8 (Split Pot)",
     "profile": "stud",
     "description": "(7CS) Stud/8 - Hi/Lo Hands Split the Pot",
     "rules": "7-Card Stud Split Pot (Variant)\n\nHigh hand and Lowest QUALIFIED hand split the pot.\n\nLow Hand Qualifications:\n* Ace-To-Five ranking\n* No Pairs\n* No card higher than an 8\n* Straights and flushes are not counted against the player\n\nIf there is no qualified low hand, then high hand takes the whole pot.\n\nYou may use different cards to play for both the High and Low hand.",
@@ -197,7 +197,7 @@
   },
   {
     "id": "stud-7card-follow-queen",
-    "displayName": "7-Card Stud — Follow the Queen",
+    "displayName": "Follow the Queen",
     "profile": "stud",
     "description": "(7CS) Follow the Queen - Next Card after a Queen is Wild",
     "rules": "7-Card Stud with Wildcards (Variant)\n\nIf and when a Queen is dealt face up, the next card dealt face up is wild. If another Queen is dealt face up, the next card dealt face up replaces the previous wildcard.\n\nIf the final card dealt face up is a Queen, then there are no wild cards.",
@@ -228,7 +228,7 @@
   },
   {
     "id": "stud-7card-baseball",
-    "displayName": "7-Card Stud — Baseball",
+    "displayName": "Baseball",
     "profile": "stud",
     "description": "(7CS) Baseball - 9s Wild, 3s Sometimes Wild, 4s Can Buy Another Card",
     "rules": "7-Card Stud Wildcards (Variant)\n\nBasics:\n* 9s are always wild\n* 3s are sometimes wild\n* Players dealt a 4 face up may buy another card\n\nDealer Options To Watch For:\n* Do 3s dealt face up require payment?\n* Are all 3s wild or only face up or face down?\n* Do 4s require payment to get an extra card",
@@ -253,8 +253,8 @@
       "smallBet": 2,
       "bigBet": 4,
       "threesUpOrDownWild": "either",
-      "priceForThrees": "free",
-      "priceForFours": "bigBet",
+      "priceForThrees": "pot",
+      "priceForFours": "bringInX2",
       "extraCardUpOrDown": "down",
       "audible": "",
       "bettingStructure": "no-limit",
@@ -264,7 +264,7 @@
   },
   {
     "id": "stud-7card-baseball-hilo",
-    "displayName": "7-Card Stud — Baseball Hi/Lo",
+    "displayName": "Baseball (HI/LO)",
     "profile": "stud",
     "description": "(7CS) Baseball - Hi/Lo Hands Split the Pot",
     "rules": "7-Card Stud Wildcards (Variant)\n\nHigh / Low hands split the Pot.\n\nBasics:\n* 9s are always wild\n* 3s are sometimes wild\n* Players dealt a 4 face up may buy another card\n\nDealer Options To Watch For:\n* Do 3s dealt face up require payment?\n* Are all 3s wild or only face up or face down?\n* Do 4s require payment to get an extra card\n* What are the Low Hand Rules",
@@ -295,8 +295,8 @@
       "bigBet": 4,
       "lowHandRules": "Ace-to-Five",
       "threesUpOrDownWild": "either",
-      "priceForThrees": "free",
-      "priceForFours": "bigBet",
+      "priceForThrees": "pot",
+      "priceForFours": "bringInX2",
       "extraCardUpOrDown": "down",
       "audible": "",
       "bettingStructure": "no-limit",
@@ -306,7 +306,7 @@
   },
   {
     "id": "stud-7card-black-mariah",
-    "displayName": "7-Card Stud — Black Mariah",
+    "displayName": "Black Mariah",
     "profile": "stud",
     "reAnteable": true,
     "hasKillCard": true,
@@ -340,7 +340,7 @@
   },
   {
     "id": "stud-7card-high-chicago",
-    "displayName": "7-Card Stud — High Chicago (Split Pot)",
+    "displayName": "High Chicago (Split Pot)",
     "profile": "stud",
     "description": "(7CS) High Chicago - Hi Hand & High Spade Down Split the Pot",
     "rules": "7-Card Stud Split Pot (Variant)\n\nPot is Split Between:\n* Highest hand and\n* Highest FACE DOWN spade\n* Ace is highest card for spade down\n\nPrior to showing hand, players must declare whether they are playing for the High hand, Highest Spade, or Both. If a player declares for \"Both\", he must win both in order to win anything.\n\nIf no spade is down, player winning the High hand wins the entire pot.\n\nAny portion of pot not allocated carries over to the next game.",
@@ -376,7 +376,7 @@
   },
   {
     "id": "stud-7card-low-chicago",
-    "displayName": "7-Card Stud — Low Chicago (Split Pot)",
+    "displayName": "Low Chicago (Split Pot)",
     "profile": "stud",
     "description": "(7CS) Low Chicago - Hi Hand & Low Spade Down Split the Pot",
     "rules": "7-Card Stud Split Pot (Variant)\n\nPot is Split Between:\n* Highest hand and\n* Lowest FACE DOWN spade\n* Deuce is the lowest card\n\nPrior to showing hand, players must declare whether they are playing for the High hand, Lowest Spade, or Both. If a player declares for \"Both\", he must win both in order to win anything.\n\nIf no spade is down, player winning the High hand wins the entire pot.\n\nAny portion of pot not allocated carries over to the next game.",
@@ -458,7 +458,7 @@
   },
   {
     "id": "holdem-omaha-8",
-    "displayName": "Omaha/8 (Hi/Lo) Split Pot",
+    "displayName": "Omaha 8 or Better",
     "profile": "holdem",
     "description": "Omaha/8 - Hi & Lo Hands Split the Pot",
     "rules": "Omaha Split Pot (Variant)\n\nHigh hand and Lowest QUALIFIED hand split the pot.\n\nLow Hand Qualifications (Stud 8 rules):\n* Ace-To-Five ranking\n* No Pairs\n* No card higher than an 8\n* Straights and flushes are not counted against the player\n\nIf there is no qualified low hand, then high hand takes the whole pot.\n\nYou may use different cards to play for both the High and Low hand.",

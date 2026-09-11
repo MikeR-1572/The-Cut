@@ -1721,23 +1721,32 @@ class GameTable {
 
   /**
    * NEW 8.1: resolves one of the `priceForThrees`/`priceForFours` enum
-   * values (`smallBet` / `bigBet` / `bigBetX2` / `bigBetX4` / `pot`) into
-   * an actual dollar amount, off the active preset's own dollar-amount
-   * options. `free` is handled entirely inline in
+   * values into an actual dollar amount, off the active preset's own
+   * dollar-amount options. `free` is handled entirely inline in
    * `_resolveOrPauseInterrupt` and never reaches this function.
+   * CHANGED 12.3 (the-cut-spec_v12-3.md Part E.2): old value set
+   * (smallBet/bigBet/bigBetX2/bigBetX4/pot) replaced with a new one
+   * (ante/bringIn/bringInX2/bringInX4/pot) -- Small Bet/Big Bet may not
+   * even exist for the current Bet/Raise Limits (Part A hides them
+   * outside Fixed-Limit), so the price list can no longer reference
+   * them. Ante and Bring In always exist regardless of betting
+   * structure. Same shape of lookup as before, new labels and new
+   * source fields, no new architecture -- resolves only at the single
+   * moment a price is actually paid (payDealInterrupt/
+   * buyDealInterrupt below), not on every render.
    */
   _resolvePriceAmount(priceValue) {
-    const smallBet = this.gameOptions?.smallBet || 0;
-    const bigBet = this.gameOptions?.bigBet || 0;
+    const ante = this.gameOptions?.anteAmount || 0;
+    const bringIn = this.gameOptions?.bringIn || 0;
     switch (priceValue) {
-      case 'smallBet':
-        return smallBet;
-      case 'bigBet':
-        return bigBet;
-      case 'bigBetX2':
-        return bigBet * 2;
-      case 'bigBetX4':
-        return bigBet * 4;
+      case 'ante':
+        return ante;
+      case 'bringIn':
+        return bringIn;
+      case 'bringInX2':
+        return bringIn * 2;
+      case 'bringInX4':
+        return bringIn * 4;
       case 'pot':
         return this.pot;
       default:

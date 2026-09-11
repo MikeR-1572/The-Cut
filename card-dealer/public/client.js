@@ -258,11 +258,16 @@
     btnSelectClose: document.getElementById('btn-select-close'),
 
     optionsDialog: document.getElementById('options-dialog'),
-    gameOptionsList: document.getElementById('game-options-list'),
+    // CHANGED 12.3 (Part B): #game-options-list/#fixed-limit-bets-display
+    // replaced with the new sectioned grid's own containers.
+    optionsLimitsFields: document.getElementById('options-limits-fields'),
+    optionsAntesTitle: document.getElementById('options-antes-title'),
+    optionsAntesFields: document.getElementById('options-antes-fields'),
+    optionsLowhandRow: document.getElementById('options-lowhand-row'),
+    optionsWildcardRow: document.getElementById('options-wildcard-row'),
     btnOptionsConfirm: document.getElementById('btn-options-confirm'),
     btnOptionsCancel: document.getElementById('btn-options-cancel'), // NEW 10.4 (Part C)
     optionsGameName: document.getElementById('options-game-name'), // NEW 8.2 (§10.5)
-    fixedLimitBetsDisplay: document.getElementById('fixed-limit-bets-display'), // NEW 9.2 (§6.10)
     btnOptionsRules: document.getElementById('btn-options-rules'), // NEW 8.2 (§10.5)
 
     aboutDialog: document.getElementById('about-dialog'),
@@ -2394,8 +2399,14 @@
   const ENUM_OPTION_VALUES = {
     lowHandRules: ['Ace-to-Five', 'Deuce-to-Seven', 'Stud 8'],
     threesUpOrDownWild: ['face up only', 'face down only', 'either'],
-    priceForThrees: ['free', 'smallBet', 'bigBet', 'bigBetX2', 'bigBetX4', 'pot'],
-    priceForFours: ['free', 'smallBet', 'bigBet', 'bigBetX2', 'bigBetX4', 'pot'],
+    // CHANGED 12.3 (the-cut-spec_v12-3.md Part E): the old list
+    // (smallBet/bigBet/bigBetX2/bigBetX4/pot/free) could reference a
+    // value that might not even exist for the current Bet/Raise Limits
+    // (Part A hides Small Bet/Big Bet entirely outside Fixed-Limit) --
+    // replaced with references that always exist regardless of betting
+    // structure: Pot, Ante, Bring In and its multiples, or Free.
+    priceForThrees: ['pot', 'ante', 'bringIn', 'bringInX2', 'bringInX4', 'free'],
+    priceForFours: ['pot', 'ante', 'bringIn', 'bringInX2', 'bringInX4', 'free'],
     extraCardUpOrDown: ['up', 'down'],
     bettingStructure: ['no-limit', 'pot-limit', 'fixed-limit'], // NEW 9.1 (§3, §6.10)
   };
@@ -2421,6 +2432,32 @@
     'face up only': 'Face Up Only',
     'face down only': 'Face Down Only',
     either: 'Face Up or Down',
+  };
+
+  /**
+   * NEW 12.3 (the-cut-spec_v12-3.md Part F): shown beneath the Low Hand
+   * Rules dropdown in the redesigned Options dialog, updating live as
+   * the value changes. Confirmed this can't live in game-choices.json
+   * (that file only ever records which ONE value a preset currently
+   * uses, never the shared option list or descriptive text about what
+   * the options mean) -- lives here instead, alongside the option list
+   * itself (ENUM_OPTION_VALUES.lowHandRules above). Finalized wording,
+   * confirmed directly by Mike -- not placeholder text.
+   */
+  const LOW_HAND_RULES_DESCRIPTIONS = {
+    'Ace-to-Five': 'Aces are always low; straights and flushes don\u2019t count against a low hand.',
+    'Deuce-to-Seven': 'Aces are always high; straights and flushes do count against a low hand.',
+    'Stud 8': 'Must have five cards 8 or lower (no pairs), to qualify for low half of pot.',
+  };
+
+  /** NEW 12.3 (Part D): plain min/max HTML attributes, no other validation behavior beyond native browser enforcement. */
+  const OPTION_NUMBER_CONSTRAINTS = {
+    maxDiscards: { min: 3, max: 5 },
+    raiseCap: { min: 1 },
+    anteAmount: { min: 0 },
+    bringIn: { min: 0 },
+    smallBlind: { min: 0 },
+    bigBlind: { min: 0 },
   };
 
   /** Reuses PRICE_DISPLAY_LABELS (defined further below, alongside describePrice) for the two price fields; threesUpOrDownWild's own three values are mapped above; every other enum value is already human-readable as delivered. */
@@ -2459,6 +2496,191 @@
    * to showing every key if that preset can't be found for any reason
    * (defensive -- matches the pre-8.1 behavior rather than showing nothing).
    */
+  /**
+   * NEW 12.3 (the-cut-spec_v12-3.md Part C): source field + multiplier
+   * pair driving the computed, read-only Small Bet/Big Bet slots --
+   * Hold'em derives from Big Blind (1x/2x, unchanged since 9.0, already
+   * server-side before this release); Draw derives from Ante (2x/4x,
+   * new); Stud derives from Bring In (2x/4x, new). Verified against
+   * every one of the 13 real Draw/Stud presets already matching this
+   * exact formula, zero exceptions, before this change.
+   */
+  const COMPUTED_BET_SOURCE = {
+    holdem: { key: 'bigBlind', smallMult: 1, bigMult: 2 },
+    draw: { key: 'anteAmount', smallMult: 2, bigMult: 4 },
+    stud: { key: 'bringIn', smallMult: 2, bigMult: 4 },
+  };
+
+  /**
+   * Builds one label+field pair for the Options dialog's sectioned grid
+   * (the-cut-spec_v12-3.md Part B). Reuses the SAME shared vocabulary
+   * the rest of the app already uses for this dialog --
+   * optionDisplayLabel/ENUM_OPTION_VALUES/optionValueLabel -- rather
+   * than a separate hardcoded label set, so a future change to any of
+   * those (e.g. Low Hand Rules gaining a fourth option) only has one
+   * place to update.
+   * `opts`: { wide, readOnly, editable, onCommitAlso(rawValue) } --
+   * onCommitAlso, when given, runs in addition to the field's own
+   * ordinary setGameOption send on 'change' (used for the bet-source
+   * fields, which also need to push the two computed fields -- see
+   * Part C.2).
+   */
+  function buildOptionField(gameTable, key, editable, opts) {
+    opts = opts || {};
+    const value = gameTable.gameOptions[key];
+    const wrap = document.createElement('div');
+    wrap.className = 'option-field' + (opts.wide ? ' option-field--wide' : '');
+    const label = document.createElement('label');
+    label.textContent = optionDisplayLabel(key);
+    wrap.appendChild(label);
+
+    let input;
+    if (ENUM_OPTION_VALUES[key]) {
+      input = document.createElement('select');
+      for (const enumValue of ENUM_OPTION_VALUES[key]) {
+        const option = document.createElement('option');
+        option.value = enumValue;
+        option.textContent = optionValueLabel(key, enumValue);
+        if (enumValue === value) option.selected = true;
+        input.appendChild(option);
+      }
+      input.value = value;
+      input.addEventListener('change', () => {
+        hideTableError();
+        send('setGameOption', { key, value: input.value });
+        if (opts.onCommitAlso) opts.onCommitAlso(input.value);
+      });
+    } else {
+      input = document.createElement('input');
+      input.className = 'mono-input';
+      input.type = typeof value === 'number' ? 'number' : 'text';
+      // NEW 9.1: raiseCap's "no-cap" stored value displays as "No Cap".
+      input.value = key === 'raiseCap' && value === 'no-cap' ? 'No Cap' : Array.isArray(value) ? value.join(',') : value;
+      if (OPTION_NUMBER_CONSTRAINTS[key]) {
+        const c = OPTION_NUMBER_CONSTRAINTS[key];
+        if (c.min !== undefined) input.min = c.min;
+        if (c.max !== undefined) input.max = c.max;
+      }
+      input.addEventListener('change', () => {
+        hideTableError();
+        const raw = input.value;
+        const sendValue = Array.isArray(value) ? raw.split(',').map((s) => s.trim()).filter(Boolean) : raw;
+        send('setGameOption', { key, value: sendValue });
+        if (opts.onCommitAlso) opts.onCommitAlso(sendValue);
+      });
+    }
+    input.dataset.optionKey = key;
+    const raiseCapLockedByStructure = key === 'raiseCap' && gameTable.gameOptions.bettingStructure === 'no-limit';
+    input.disabled = !editable || raiseCapLockedByStructure;
+    wrap.appendChild(input);
+    return wrap;
+  }
+
+  /** A reserved-but-invisible slot -- same structure as a real field (so it takes up exactly the same space), just hidden via visibility rather than omitted, per Part B's fixed-grid requirement. */
+  function buildPlaceholderField(key, wide) {
+    const label = document.createElement('label');
+    label.textContent = optionDisplayLabel(key);
+    const input = document.createElement('input');
+    const wrap = document.createElement('div');
+    wrap.className = 'option-field option-field--placeholder' + (wide ? ' option-field--wide' : '');
+    wrap.append(label, input);
+    return wrap;
+  }
+
+  /**
+   * NEW 12.3 (Part C.2): pushes the CURRENT live value into the two
+   * computed, read-only fields -- called on the source field's own
+   * 'input' event (every keystroke) for live visual feedback, with no
+   * server round-trip. Never touches whichever field currently has
+   * focus (there isn't one here, since these two are always read-only,
+   * but kept consistent with the "don't clobber an in-progress edit"
+   * rule the rest of this dialog already follows).
+   */
+  function previewComputedBets(rawSourceValue, smallMult, bigMult) {
+    const sourceValue = Number(rawSourceValue) || 0;
+    if (el.optionsComputedSmallBet) el.optionsComputedSmallBet.value = sourceValue * smallMult;
+    if (el.optionsComputedBigBet) el.optionsComputedBigBet.value = sourceValue * bigMult;
+  }
+
+  /**
+   * NEW 12.3 (Part C.2/A): re-evaluates, on every call (rebuild AND
+   * in-place refresh alike), whether Max Raises Per Round / Small Bet /
+   * Big Bet should currently be visible, and keeps the two computed
+   * fields' displayed values in sync with the AUTHORITATIVE server
+   * state -- UNLESS the relevant source field currently has focus (an
+   * in-progress edit takes priority over a possibly-stale broadcast,
+   * same "don't clobber what's being typed" rule as every other field
+   * in this dialog).
+   */
+  function refreshOptionsConditionalFields(gameTable, structureOverride) {
+    // CHANGED 12.3 (bug caught by manual trace, not the initial pass):
+    // gameTable is a closure-captured parameter from whenever the
+    // dialog was last rendered -- reading gameTable.gameOptions.
+    // bettingStructure immediately after the Dealer's OWN click on that
+    // dropdown returns the STALE pre-click value, since the
+    // authoritative update only lands on the next server broadcast.
+    // structureOverride lets the dropdown's own change handler pass the
+    // just-selected value directly for its own immediate local
+    // reaction; every other caller (rebuild, in-place refresh) omits it
+    // and falls back to the real gameTable state as before.
+    const structure = structureOverride || gameTable.gameOptions.bettingStructure;
+    const isNoLimit = structure === 'no-limit';
+    const isFixedLimit = structure === 'fixed-limit';
+
+    if (el.optionsRaiseCapField) {
+      el.optionsRaiseCapField.classList.toggle('option-field--placeholder', isNoLimit);
+    }
+    if (el.optionsSmallBetField) {
+      el.optionsSmallBetField.classList.toggle('option-field--placeholder', !isFixedLimit);
+    }
+    if (el.optionsBigBetField) {
+      el.optionsBigBetField.classList.toggle('option-field--placeholder', !isFixedLimit);
+    }
+
+    const source = COMPUTED_BET_SOURCE[gameTable.profile];
+    if (!source || !isFixedLimit) return;
+    const sourceInput = el.optionsAntesFields.querySelector(`[data-option-key="${source.key}"]`);
+    if (sourceInput && document.activeElement === sourceInput) return; // in-progress edit wins
+    const sourceValue = Number(gameTable.gameOptions[source.key]) || 0;
+    if (el.optionsComputedSmallBet) el.optionsComputedSmallBet.value = sourceValue * source.smallMult;
+    if (el.optionsComputedBigBet) el.optionsComputedBigBet.value = sourceValue * source.bigMult;
+  }
+
+  /**
+   * NEW 12.3 (Part C.2): whenever the source field commits (Ante/Bring
+   * In's own 'change' event -- blur/commit, the same moment every other
+   * field in this dialog already sends, not every keystroke) OR
+   * Bet/Raise Limits switches INTO Fixed-Limit (in case the source
+   * changed while these were hidden and therefore not being kept in
+   * sync), the app itself -- not the Dealer -- explicitly resends the
+   * computed Small Bet/Big Bet to the server. Hold'em is deliberately
+   * excluded: `_fixedLimitSize()` computes its own Fixed-Limit sizing
+   * directly from bigBlind server-side and has never read a stored
+   * smallBet/bigBet at all, so there is nothing to keep in sync there --
+   * confirmed directly against gameTable.js before writing this.
+   * `structureOverride`: same stale-closure reasoning as
+   * refreshOptionsConditionalFields above -- without it, this would
+   * silently no-op on exactly the "switching INTO Fixed-Limit" case the
+   * spec calls out, since the closure's own gameTable.gameOptions.
+   * bettingStructure hasn't been updated by the server yet at the
+   * moment this fires from the dropdown's own change handler.
+   */
+  function pushComputedBets(gameTable, sourceValueOverride, structureOverride) {
+    const source = COMPUTED_BET_SOURCE[gameTable.profile];
+    if (!source || gameTable.profile === 'holdem') return;
+    const structure = structureOverride || gameTable.gameOptions.bettingStructure;
+    if (structure !== 'fixed-limit') return;
+    // CHANGED 12.3 (bug caught by manual trace): when this fires from
+    // the SOURCE field's own commit (Ante/Bring In/Big Blind changing),
+    // gameTable.gameOptions[source.key] is STILL the pre-edit value --
+    // the authoritative update hasn't landed from the server yet. The
+    // source field's own change handler passes the just-committed raw
+    // value directly instead of trusting the stale closure.
+    const sourceValue = sourceValueOverride !== undefined ? sourceValueOverride : (Number(gameTable.gameOptions[source.key]) || 0);
+    send('setGameOption', { key: 'smallBet', value: sourceValue * source.smallMult });
+    send('setGameOption', { key: 'bigBet', value: sourceValue * source.bigMult });
+  }
+
   function renderOptionsDialogFields(gameTable, isDealer) {
     const editable = isDealer && gameTable.idle;
     el.btnOptionsConfirm.textContent = editable ? 'Start' : 'Close';
@@ -2482,7 +2704,10 @@
     el.btnOptionsCancel.hidden = !editable;
 
     if (!gameTable.gameOptions) {
-      el.gameOptionsList.innerHTML = '';
+      el.optionsLimitsFields.innerHTML = '';
+      el.optionsAntesFields.innerHTML = '';
+      el.optionsLowhandRow.innerHTML = '';
+      el.optionsWildcardRow.innerHTML = '';
       el.optionsGameName.textContent = '';
       return;
     }
@@ -2494,98 +2719,147 @@
     // separate, frequently-reopened view.
     el.optionsGameName.textContent = preset?.displayName || '';
     const dealerOptionKeys = preset?.dealerOptions ? new Set(Object.keys(preset.dealerOptions)) : null;
-    const visibleKeys = Object.keys(gameTable.gameOptions).filter((key) => !dealerOptionKeys || dealerOptionKeys.has(key));
+    const has = (key) => !dealerOptionKeys || dealerOptionKeys.has(key);
 
     if (state.gameOptionsEditorFor !== gameTable.gameChoiceId) {
       state.gameOptionsEditorFor = gameTable.gameChoiceId;
-      el.gameOptionsList.innerHTML = '';
-      for (const key of visibleKeys) {
-        const value = gameTable.gameOptions[key];
-        const row = document.createElement('div');
-        row.className = 'game-option-row';
 
-        const label = document.createElement('span');
-        label.className = 'game-option-key';
-        label.textContent = optionDisplayLabel(key);
+      // ---- Limits: Max Discards [Draw only, no reserved gap] -> Bet/Raise Limits -> Max Raises Per Round [reserved gap under No-Limit] ----
+      el.optionsLimitsFields.innerHTML = '';
+      if (has('maxDiscards')) {
+        el.optionsLimitsFields.appendChild(buildOptionField(gameTable, 'maxDiscards', editable, { wide: true }));
+      }
+      el.optionsLimitsFields.appendChild(buildOptionField(gameTable, 'bettingStructure', editable, {
+        wide: true,
+        onCommitAlso: (newValue) => {
+          refreshOptionsConditionalFields(gameTable, newValue);
+          pushComputedBets(gameTable, undefined, newValue);
+        },
+      }));
+      const raiseCapField = buildOptionField(gameTable, 'raiseCap', editable, { wide: true });
+      el.optionsLimitsFields.appendChild(raiseCapField);
+      el.optionsRaiseCapField = raiseCapField;
 
-        let input;
-        if (ENUM_OPTION_VALUES[key]) {
-          input = document.createElement('select');
-          for (const enumValue of ENUM_OPTION_VALUES[key]) {
-            const option = document.createElement('option');
-            option.value = enumValue;
-            option.textContent = optionValueLabel(key, enumValue);
-            input.appendChild(option);
-          }
-          input.value = value;
-          input.addEventListener('change', () => {
-            hideTableError();
-            send('setGameOption', { key, value: input.value });
-          });
-        } else {
-          input = document.createElement('input');
-          input.className = 'mono-input';
-          input.type = typeof value === 'number' ? 'number' : 'text';
-          // NEW 9.1: raiseCap's "no-cap" stored value displays as "No Cap"
-          // -- still sends the raw "no-cap" string back if somehow edited
-          // (it's disabled whenever showing this, per raiseCapLockedByStructure below).
-          input.value = key === 'raiseCap' && value === 'no-cap' ? 'No Cap' : Array.isArray(value) ? value.join(',') : value;
-          input.addEventListener('change', () => {
-            hideTableError();
-            const raw = input.value;
-            const sendValue = Array.isArray(value) ? raw.split(',').map((s) => s.trim()).filter(Boolean) : raw;
-            send('setGameOption', { key, value: sendValue });
-          });
+      // ---- Antes & Bets / Blinds & Bets: fixed 2x2 grid, always the same order -- see Part B/C for why. ----
+      el.optionsAntesTitle.textContent = gameTable.profile === 'holdem' ? 'Blinds & Bets' : 'Antes & Bets';
+      el.optionsAntesFields.innerHTML = '';
+      const topKey = gameTable.profile === 'holdem' ? 'smallBlind' : 'anteAmount';
+      const bottomKey = gameTable.profile === 'holdem' ? 'bigBlind' : 'bringIn';
+      const source = COMPUTED_BET_SOURCE[gameTable.profile];
+
+      const topIsSource = source && source.key === topKey;
+      const topField = buildOptionField(gameTable, topKey, editable, topIsSource ? {
+        onCommitAlso: (newValue) => pushComputedBets(gameTable, Number(newValue) || 0),
+      } : {});
+      if (topIsSource) {
+        topField.querySelector('input,select').addEventListener('input', (e) => previewComputedBets(e.target.value, source.smallMult, source.bigMult));
+      }
+      el.optionsAntesFields.appendChild(topField);
+
+      // Small Bet / Big Bet: ALWAYS real, read-only, for every profile
+      // (Part C) -- computed from the source field above, never typed
+      // into directly. Reused ids so refreshOptionsConditionalFields()
+      // can patch them in place without a rebuild.
+      const smallBetField = document.createElement('div');
+      smallBetField.className = 'option-field';
+      const smallBetLabel = document.createElement('label');
+      smallBetLabel.textContent = optionDisplayLabel('smallBet');
+      const smallBetInput = document.createElement('input');
+      smallBetInput.type = 'number';
+      smallBetInput.readOnly = true;
+      smallBetInput.disabled = !editable;
+      smallBetField.append(smallBetLabel, smallBetInput);
+      el.optionsAntesFields.appendChild(smallBetField);
+      el.optionsSmallBetField = smallBetField;
+      el.optionsComputedSmallBet = smallBetInput;
+
+      const bottomHasKey = has(bottomKey) && gameTable.gameOptions[bottomKey] !== undefined;
+      const bottomIsSource = source && source.key === bottomKey;
+      let bottomField;
+      if (bottomHasKey) {
+        bottomField = buildOptionField(gameTable, bottomKey, editable, bottomIsSource ? {
+          onCommitAlso: (newValue) => pushComputedBets(gameTable, Number(newValue) || 0),
+        } : {});
+        if (bottomIsSource) {
+          bottomField.querySelector('input,select').addEventListener('input', (e) => previewComputedBets(e.target.value, source.smallMult, source.bigMult));
         }
-        input.dataset.optionKey = key;
-        // NEW 9.1 (§3): raiseCap is dependent on bettingStructure -- shows
-        // "No Cap" and stays disabled (not Dealer-editable) under
-        // No-Limit, regardless of the general editable/idle state.
-        const raiseCapLockedByStructure = key === 'raiseCap' && gameTable.gameOptions.bettingStructure === 'no-limit';
-        input.disabled = !editable || raiseCapLockedByStructure;
-
-        row.append(label, input);
-        el.gameOptionsList.appendChild(row);
-      }
-    } else {
-      el.gameOptionsList.querySelectorAll('[data-option-key]').forEach((input) => {
-        const raiseCapLockedByStructure =
-          input.dataset.optionKey === 'raiseCap' && gameTable.gameOptions.bettingStructure === 'no-limit';
-        input.disabled = !editable || raiseCapLockedByStructure;
-        if (document.activeElement === input) return;
-        const value = gameTable.gameOptions[input.dataset.optionKey];
-        input.value =
-          input.dataset.optionKey === 'raiseCap' && value === 'no-cap'
-            ? 'No Cap'
-            : Array.isArray(value)
-              ? value.join(',')
-              : value;
-      });
-    }
-
-    // NEW 9.2 (§6.10), extended to Stud/Draw in 9.4: Fixed-Limit's Small
-    // Bet/Big Bet, shown read-only once that structure is selected.
-    // Hold'em: computed/live-recomputed from smallBlind/bigBlind (fully
-    // derived, never independently set). Stud/Draw: reflects the
-    // directly-configured smallBet/bigBet Dealer Options instead, since
-    // neither has blinds to derive anything from. Hidden entirely under
-    // No-Limit/Pot-Limit, where these figures don't apply. Always
-    // refreshed on every call, not gated behind the rebuild-vs-update
-    // branching above, since it's not part of the per-key options loop.
-    const isFixedLimitStructure = gameTable.gameOptions.bettingStructure === 'fixed-limit';
-    el.fixedLimitBetsDisplay.hidden = !isFixedLimitStructure;
-    if (isFixedLimitStructure) {
-      let smallBet;
-      let bigBet;
-      if (gameTable.profile === 'holdem') {
-        const bigBlind = Number(gameTable.gameOptions.bigBlind) || 0;
-        smallBet = bigBlind;
-        bigBet = bigBlind * 2;
       } else {
-        smallBet = Number(gameTable.gameOptions.smallBet) || 0;
-        bigBet = Number(gameTable.gameOptions.bigBet) || 0;
+        bottomField = buildPlaceholderField(bottomKey, false);
       }
-      el.fixedLimitBetsDisplay.textContent = `Small Bet: $${smallBet} \u00b7 Big Bet: $${bigBet}`;
+      el.optionsAntesFields.appendChild(bottomField);
+
+      const bigBetField = document.createElement('div');
+      bigBetField.className = 'option-field';
+      const bigBetLabel = document.createElement('label');
+      bigBetLabel.textContent = optionDisplayLabel('bigBet');
+      const bigBetInput = document.createElement('input');
+      bigBetInput.type = 'number';
+      bigBetInput.readOnly = true;
+      bigBetInput.disabled = !editable;
+      bigBetField.append(bigBetLabel, bigBetInput);
+      el.optionsAntesFields.appendChild(bigBetField);
+      el.optionsBigBetField = bigBetField;
+      el.optionsComputedBigBet = bigBetInput;
+
+      // ---- Low Hand Rules / Dealer's Audible: per-game presence only, no reserved gap. ----
+      el.optionsLowhandRow.innerHTML = '';
+      if (has('lowHandRules') && gameTable.gameOptions.lowHandRules !== undefined) {
+        const lowHandField = buildOptionField(gameTable, 'lowHandRules', editable, { wide: true });
+        const desc = document.createElement('p');
+        desc.className = 'options-field-description';
+        desc.textContent = LOW_HAND_RULES_DESCRIPTIONS[gameTable.gameOptions.lowHandRules] || '';
+        const select = lowHandField.querySelector('select');
+        select.addEventListener('change', () => {
+          desc.textContent = LOW_HAND_RULES_DESCRIPTIONS[select.value] || '';
+        });
+        lowHandField.appendChild(desc);
+        el.optionsLowhandRow.appendChild(lowHandField);
+      }
+      if (has('audible') && gameTable.gameOptions.audible !== undefined) {
+        el.optionsLowhandRow.appendChild(buildOptionField(gameTable, 'audible', editable, { wide: true }));
+      }
+
+      // ---- Baseball wild-card block: whole section conditional, single 2-col grid in the PDF's own row order. ----
+      el.optionsWildcardRow.innerHTML = '';
+      const hasWild = (has('threesUpOrDownWild') && gameTable.gameOptions.threesUpOrDownWild !== undefined)
+        || (has('priceForThrees') && gameTable.gameOptions.priceForThrees !== undefined);
+      if (hasWild) {
+        const grid = document.createElement('div');
+        grid.className = 'options-field-grid';
+        if (gameTable.gameOptions.priceForThrees !== undefined) grid.appendChild(buildOptionField(gameTable, 'priceForThrees', editable));
+        if (gameTable.gameOptions.priceForFours !== undefined) grid.appendChild(buildOptionField(gameTable, 'priceForFours', editable));
+        if (gameTable.gameOptions.threesUpOrDownWild !== undefined) grid.appendChild(buildOptionField(gameTable, 'threesUpOrDownWild', editable));
+        if (gameTable.gameOptions.extraCardUpOrDown !== undefined) grid.appendChild(buildOptionField(gameTable, 'extraCardUpOrDown', editable));
+        el.optionsWildcardRow.appendChild(grid);
+      }
+
+      refreshOptionsConditionalFields(gameTable);
+    } else {
+      // ---- In-place refresh: same game choice, a new broadcast arrived. Update values/disabled state on already-existing elements; never rebuild, never clobber a focused input. ----
+      [el.optionsLimitsFields, el.optionsAntesFields, el.optionsLowhandRow, el.optionsWildcardRow].forEach((container) => {
+        container.querySelectorAll('[data-option-key]').forEach((input) => {
+          const raiseCapLockedByStructure =
+            input.dataset.optionKey === 'raiseCap' && gameTable.gameOptions.bettingStructure === 'no-limit';
+          input.disabled = !editable || raiseCapLockedByStructure;
+          if (document.activeElement === input) return;
+          const value = gameTable.gameOptions[input.dataset.optionKey];
+          input.value =
+            input.dataset.optionKey === 'raiseCap' && value === 'no-cap'
+              ? 'No Cap'
+              : Array.isArray(value)
+                ? value.join(',')
+                : value;
+        });
+      });
+      if (el.optionsComputedSmallBet) el.optionsComputedSmallBet.disabled = !editable;
+      if (el.optionsComputedBigBet) el.optionsComputedBigBet.disabled = !editable;
+      // Low Hand Rules description also needs to track an authoritative
+      // value change (e.g. a reconnect resynced state) even though the
+      // dropdown's own value refresh happened in the loop above.
+      const lowHandDesc = el.optionsLowhandRow.querySelector('.options-field-description');
+      if (lowHandDesc) lowHandDesc.textContent = LOW_HAND_RULES_DESCRIPTIONS[gameTable.gameOptions.lowHandRules] || '';
+
+      refreshOptionsConditionalFields(gameTable);
     }
   }
 
@@ -2732,29 +3006,48 @@
   // `bigBetX2`, etc.) stay exactly as delivered -- only the DISPLAYED
   // text gets proper spacing/casing. `free` prices never reach this
   // dialog at all (they auto-resolve server-side, no pause), so it's
-  // only listed here for completeness.
+  // NEW 8.1 (§5.10 extension): plain-English labels for the price
+  // enum's own values, used both in the Options dialog's dropdown (via
+  // optionValueLabel) and the affected player's own Pay/Buy decision
+  // dialog (via describePrice below). `smallBet`/`bigBet` aren't valid
+  // dealerOptions keys in their own right -- kept here only insofar as
+  // they're VALUES of priceForThrees/priceForFours, so they're not
+  // duplicated in OPTION_DISPLAY_LABELS above; only listed here for
+  // completeness.
+  // CHANGED 12.3 (Part E): old value set (smallBet/bigBet/bigBetX2/
+  // bigBetX4/pot/free) replaced with the new one (pot/ante/bringIn/
+  // bringInX2/bringInX4/free) -- see ENUM_OPTION_VALUES above for the
+  // full reasoning. `pot`'s special "the pot" text and `free`'s plain
+  // "Free" are unchanged from before; only the four bet-based entries
+  // were swapped for four Ante/Bring-In-based ones.
   const PRICE_DISPLAY_LABELS = {
     free: 'Free',
-    smallBet: 'Small Bet',
-    bigBet: 'Big Bet',
-    bigBetX2: 'Big Bet x2',
-    bigBetX4: 'Big Bet x4',
+    ante: 'Ante',
+    bringIn: 'Bring In',
+    bringInX2: 'Bring In x2',
+    bringInX4: 'Bring In x4',
     pot: 'the pot',
   };
 
-  /** Mirrors GameTable#_resolvePriceAmount exactly -- kept in sync by hand, same convention as every other server-gating mirror in this file. */
+  /**
+   * Mirrors GameTable#_resolvePriceAmount exactly -- kept in sync by
+   * hand, same convention as every other server-gating mirror in this
+   * file. CHANGED 12.3 (Part E.2): resolves off anteAmount/bringIn now,
+   * not smallBet/bigBet -- identical shape to the server's own rewrite,
+   * new labels and new source fields, no new architecture.
+   */
   function resolvePriceAmount(gameTable, priceValue) {
-    const smallBet = gameTable.gameOptions?.smallBet || 0;
-    const bigBet = gameTable.gameOptions?.bigBet || 0;
+    const ante = gameTable.gameOptions?.anteAmount || 0;
+    const bringIn = gameTable.gameOptions?.bringIn || 0;
     switch (priceValue) {
-      case 'smallBet':
-        return smallBet;
-      case 'bigBet':
-        return bigBet;
-      case 'bigBetX2':
-        return bigBet * 2;
-      case 'bigBetX4':
-        return bigBet * 4;
+      case 'ante':
+        return ante;
+      case 'bringIn':
+        return bringIn;
+      case 'bringInX2':
+        return bringIn * 2;
+      case 'bringInX4':
+        return bringIn * 4;
       case 'pot':
         return gameTable.pot;
       default:

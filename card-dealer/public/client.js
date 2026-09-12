@@ -1711,6 +1711,20 @@
       columns[colIndex].appendChild(row);
     });
 
+    // FIXED (build review): .hand-ranks-suit-section was left as a
+    // dialog-level sibling of .hand-ranks-columns in the HTML -- with
+    // nothing constraining its width to one column, it rendered as a
+    // full-width band below all three columns instead of sitting
+    // compactly under "One Pair / High Card" in the third column, per
+    // the mockup and the redesign handoff. Moved here into columns[2]
+    // before the columns themselves get appended -- appendChild moves
+    // an already-in-document element rather than cloning it, so this
+    // relocates the real element (and #hand-ranks-suit-cards along
+    // with it, since that's a child of this section) rather than
+    // building a second copy.
+    const suitSection = el.handRanksSuitCards.parentElement;
+    if (suitSection) columns[2].appendChild(suitSection);
+
     columns.forEach((col) => el.handRanksColumns.appendChild(col));
 
     el.handRanksSuitCards.innerHTML = '';

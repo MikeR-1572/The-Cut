@@ -69,6 +69,10 @@ class GameTable {
     this.pot = 0;
     this.bettingOpen = false;
     this.currentBetToCall = 0;
+    // NEW 12.6 (Part C.2): initialized here too, not just in
+    // openBetting()/_performFullReset(), so toRedactedState() never
+    // sees undefined before the table's first betting round ever opens.
+    this.streetActionLog = [];
     this.pendingClaim = null; // { proposerId, allocations: [{playerId, amount}], approverId } | null
 
     // NEW 4.0: Game Profiles & Game Choices.
@@ -1935,6 +1939,11 @@ class GameTable {
     this.bettingOpen = false;
     this.currentBetToCall = 0;
     this._actedSinceRaise = new Set();
+    // NEW 12.6 (Part C.2): see openBetting()'s own comment -- reset
+    // here too so Terminate Cleanly/Restore Stacks, and every brand-new
+    // hand, never carry a stale log from whatever street the prior
+    // hand last had open.
+    this.streetActionLog = [];
     this.burnedThisHand = 0;
     this.bettingRoundsThisHand = 0;
     this.discardWindowOpen = true;
@@ -3333,6 +3342,12 @@ class GameTable {
     const bringInApplies = isStud && this.handPhase === 'StreetABetting' && typeof this.gameOptions?.bringIn === 'number';
 
     this.bettingOpen = true;
+    // NEW 12.6 (Part C.2): fresh per-street betting history -- reset
+    // here (a genuinely new betting round opening) and in
+    // _performFullReset() (Terminate Cleanly/Restore Stacks, and every
+    // brand-new hand), so a stale log from whatever street the prior
+    // hand/round last had open never carries forward.
+    this.streetActionLog = [];
     this._actedSinceRaise = new Set();
     this._bringInObligationId = null;
     // NEW 9.0 (§6.10): fresh per-round raise tracking. PreFlopBetting
@@ -4057,6 +4072,15 @@ class GameTable {
       this.raiseCountThisRound += 1;
     }
 
+    // NEW 12.6 (Part C.2): per-street betting history -- always public,
+    // no redaction needed (this action is already public knowledge the
+    // moment it happens). Reuses the already-computed wasOpeningBet
+    // distinction rather than re-deriving it.
+    this.streetActionLog.push({
+      playerName: player.name,
+      text: wasOpeningBet ? `bet $${amount}` : `raised to $${amount}`,
+    });
+
     if (this._bringInObligationId === player.id) this._bringInObligationId = null; // NEW 7.0 (§6.8): resolved by raising over it
     this._actedSinceRaise = new Set([player.id]);
     this._recomputePots(); // NEW 9.0 (§6.10), extended 9.4
@@ -4105,6 +4129,11 @@ class GameTable {
     player.currentBet = this.currentBetToCall;
     this.pot += owed;
     player.totalContributedThisHand = (player.totalContributedThisHand || 0) + owed; // NEW 9.0 (§6.10)
+
+    // NEW 12.6 (Part C.2): logs the amount actually added (owed),
+    // matching how the Call button itself is already labeled
+    // ("Call $X" in client.js).
+    this.streetActionLog.push({ playerName: player.name, text: `called $${owed}` });
 
     if (this._bringInObligationId === player.id) this._bringInObligationId = null; // NEW 7.0 (§6.8): resolved by paying it
     this._actedSinceRaise.add(player.id);
@@ -4183,6 +4212,10 @@ class GameTable {
 
     this._checkUncalledBetRefund(); // NEW 9.1 (§6.10) -- All-In is exempt from the proactive opponent-ceiling cap, so it can create a brand-new excess immediately, with no fold required
     this._recomputePots(); // NEW 9.0 (§6.10), extended 9.4
+    // NEW 12.6 (Part C.2): logs the amount actually committed (amount,
+    // capped per the legal-max logic above -- not necessarily the
+    // player's full remaining stack).
+    this.streetActionLog.push({ playerName: player.name, text: `is all-in for $${amount}` });
     this._queueAnnouncement(`${player.name} is ALL IN for $${amount}!`, 'allin'); // NEW 9.0 (§6.11): dramatic table-wide notice
     this.currentTurnPlayerId = this._nextTurnPlayerId();
     this._maybeCloseBettingRound();
@@ -4198,6 +4231,10 @@ class GameTable {
       return { ok: false, error: "Can't check \u2014 there's a bet to call." };
     }
 
+    // NEW 12.6 (Part C.2): logged before the actedSinceRaise mutation
+    // below purely for readability -- order doesn't matter functionally,
+    // this action can't fail past this point.
+    this.streetActionLog.push({ playerName: player.name, text: 'checked' });
     this._actedSinceRaise.add(player.id);
     this.currentTurnPlayerId = this._nextTurnPlayerId();
     this._maybeCloseBettingRound();
@@ -4273,6 +4310,12 @@ class GameTable {
     if (guard.error) return { ok: false, error: guard.error };
     guard.player.folded = true;
 
+    // NEW 12.6 (Part C.2): only the normal turn-gated betting-round fold
+    // logs to streetActionLog -- NOT the Showdown/Declare fold above
+    // (betting's already closed by then, not part of a betting round)
+    // or the deal-interrupt fold higher up (also not part of a betting
+    // round at all).
+    this.streetActionLog.push({ playerName: guard.player.name, text: 'folded' });
     this._actedSinceRaise.add(guard.player.id);
     // NEW 9.1 (§6.10): the uncalled-bet refund check -- fires on every
     // fold, before the next pot-tier recomputation, per spec.
@@ -4917,6 +4960,12 @@ class GameTable {
       pot: this.pot,
       bettingOpen: this.bettingOpen,
       currentBetToCall: this.currentBetToCall,
+      // NEW 12.6 (Part C.2): the current betting round's own action
+      // history only (reset every time a new round opens, not the
+      // whole hand) -- always public, unredacted, identical for every
+      // viewer, same as every other action's own return value already
+      // was the moment it happened.
+      streetActionLog: this.streetActionLog,
       pendingClaim: this.pendingClaim,
       communityCards: this.communityCards,
       gameChoiceId: this.gameChoiceId,

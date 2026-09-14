@@ -88,6 +88,23 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; }
 }
 
 .mono-input { font-family: var(--font-mono); letter-spacing: 0.08em; }
+/* NEW 12.6 (Part A.3): spinner arrows hidden on every numeric field in
+   the app, not just Hold'em's blinds -- per Mike's direct preference,
+   rather than continuing to rely on browser spinner behavior at all
+   anywhere. Consistency across the app rather than leaving some fields
+   with spinners and others without. Fields stay type="number" (not
+   switched to text) -- this only hides the spinner control itself; the
+   numeric keyboard on mobile, character filtering, and every field's
+   existing min/max/clamp logic are all unaffected. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
 /* NEW 11.5 (Part B): a dedicated class, deliberately separate from
    .mono-input -- that class is also shared by numerous unrelated
    numeric/select fields throughout the app (buy-in amounts, bet
@@ -1062,6 +1079,23 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
 
 .card-index { font-size: 0.81rem; font-weight: 700; line-height: 1; display: flex; flex-direction: column; align-items: center; }
 .card-index.bottom { align-self: flex-end; transform: rotate(180deg); }
+/* NEW 12.6 (Part E): top index only gets the row layout -- it's the
+   only one that can carry an embellishment icon (one-eyed jacks/
+   suicide king) alongside the rank letter. Bottom stays column (a
+   single child, rotated 180deg), unaffected. */
+.card-index:not(.bottom) { flex-direction: row; align-items: center; gap: 1px; }
+.card-embellishment {
+  /* CHANGED: height-only sizing with width:auto (not a fixed
+     width+height pair) -- the eye icon (16x10 viewBox) and the dagger
+     icon (16x6) have different aspect ratios; forcing both into the
+     same fixed box would stretch one of them. No width/height HTML
+     attributes on the <svg> itself, so the browser derives width from
+     the intrinsic viewBox ratio once height is set here. */
+  height: 0.42em;
+  width: auto;
+  flex-shrink: 0;
+  color: currentColor;
+}
 .card-suit-glyph { font-size: 1.38rem; align-self: center; }
 
 /* face-down card, for every seat that isn't the viewer's own */
@@ -1526,6 +1560,57 @@ select option {
 .betting-rail-shared {
   font-family: var(--font-display);
   font-size: 0.95rem;
+  color: var(--brass-bright);
+}
+/* NEW 12.6 (Part C.3): corner toggle + popup panel for the current
+   street's own betting history. Absolutely positioned within
+   .betting-rail (already position:relative, see its own comment
+   above) rather than a sidebar -- the rail itself is a short
+   horizontal bar with no room to slide sideways. */
+.history-toggle {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 5;
+  background: transparent;
+  border: none;
+  color: var(--ivory-dim);
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.history-toggle:hover {
+  color: var(--brass-bright);
+}
+.history-toggle.is-open {
+  color: var(--brass-bright);
+}
+.history-panel {
+  position: absolute;
+  bottom: 100%;
+  right: 12px;
+  margin-bottom: 6px;
+  width: 240px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--felt-deep);
+  border: 1px solid var(--brass);
+  border-radius: var(--radius-s);
+  padding: 8px 10px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.history-entry {
+  font-size: 0.78rem;
+  color: var(--ivory);
+  line-height: 1.3;
+}
+.history-entry .history-player {
+  font-weight: 600;
   color: var(--brass-bright);
 }
 /* NEW 9.2 (§6.10): persistent for the rest of the betting round, once

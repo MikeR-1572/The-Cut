@@ -4,6 +4,49 @@
   const SUIT_GLYPH = { hearts: '\u2665', diamonds: '\u2666', clubs: '\u2663', spades: '\u2660', joker: '\u2605' };
   const RED_SUITS = new Set(['hearts', 'diamonds']);
 
+  /**
+   * NEW 12.6 (Part E): a small supplementary icon next to the rank
+   * letter in a card's TOP-LEFT corner only (never the rotated bottom
+   * index, to avoid cluttering a card this small) -- a nod to two
+   * long-standing nicknames from real physical decks: the "one-eyed
+   * jacks" (J-spades, J-hearts) and the "suicide king" (K-hearts).
+   * This app's cards are plain index-plus-glyph, not illustrated court
+   * cards, so reproducing real deck artwork wasn't an option -- a
+   * simple eye icon (outline + pupil) and a simple dagger icon (blade
+   * + crossguard + pommel, oriented horizontally) stand in instead.
+   * currentColor + em-unit sizing so both automatically follow the
+   * card's own black/red ink and scale correctly across every
+   * card-size context already in the app (table cards, the viewer's
+   * own larger hand, the smaller Hand Ranks reference cards) with no
+   * separate color/size handling needed anywhere.
+   */
+  function cardEmbellishment(rank, suit) {
+    if (rank === 'J' && (suit === 'spades' || suit === 'hearts')) {
+      return '<svg class="card-embellishment" viewBox="0 0 16 10" aria-hidden="true"><path d="M1 5 Q8 0.5 15 5 Q8 9.5 1 5 Z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="5" r="1.6" fill="currentColor"/></svg>';
+    }
+    if (rank === 'K' && suit === 'hearts') {
+      // FIXED (build review): the delivered version was mirrored
+      // left-right from the orientation Mike actually approved --
+      // confirmed by direct coordinate math (rotating the original
+      // vertical dagger 90deg clockwise per (x,y) -> (-y,x) puts the
+      // point on the right, handle/pommel on the left; the shipped
+      // version had the crossguard+pommel clustered on the right
+      // instead). This is the verified version matching the approved
+      // mockup exactly.
+      return '<svg class="card-embellishment card-embellishment--dagger" viewBox="0 0 26 16" aria-hidden="true"><line x1="4" y1="8" x2="22" y2="8" stroke="currentColor" stroke-width="2"/><line x1="16" y1="2" x2="16" y2="14" stroke="currentColor" stroke-width="2"/><circle cx="4" cy="8" r="2.6" fill="currentColor"/></svg>';
+    }
+    return '';
+  }
+
+  /**
+   * Shared by renderCard() and buildHandRanksCard() -- the top-left
+   * corner's own rank-plus-optional-embellishment markup, kept in one
+   * place so the two card-building paths can't drift apart.
+   */
+  function cardTopIndexHtml(rank, suit) {
+    return `<span>${rank}</span>${cardEmbellishment(rank, suit)}`;
+  }
+
   // NEW 8.1 (§6.9): parses a short preset-authored card code (e.g. "Qs")
   // into a human-readable name ("Queen of Spades") for Kill Hand's
   // confirmation dialog -- per Mike's explicit call, the dialog should
@@ -32,8 +75,14 @@
     gameChoices: [], // fetched once from /game-choices.json (v4.0)
     gameOptionsEditorFor: null, // gameChoiceId the Options dialog fields were last built for -- rebuild only when it changes
     handRanksBuilt: false, // NEW 12.5 (Part E): static content, built once on first open, never rebuilt
+    historyOpen: false, // NEW 12.6 (Part C.3): whether the betting-history popup is currently expanded
     appInfo: null, // fetched once from /app-info.json (v4.1, About button)
-    pendingAutoOpenOptions: false, // v4.1: Select auto-opens Options once the new gameChoiceId lands
+    // REMOVED 12.6 (Part D): pendingAutoOpenOptions removed -- was a
+    // purely local flag set only inside Select's own click handler, so
+    // no OTHER player's dialog ever opened automatically. Replaced by
+    // lastSeenGameChoiceId below, a universal per-client check that
+    // works the same way for every viewer, Dealer or not.
+    lastSeenGameChoiceId: undefined, // NEW 12.6 (Part D): baseline set on first observation, not treated as a change
     wasShowingTurnActions: false, // NEW 5.1 (bug fix) -- edge-triggered Bet/Raise box clearing; see renderBettingRail
     myReconnectCode: null, // NEW 11.0 (Part D) -- this Player's own code, shown so they don't have to ask the Host for it
     isReconnect: false, // NEW 11.2 (Fix 6) -- set from the 'joined' message's own field
@@ -284,6 +333,9 @@
     bettingRail: document.getElementById('betting-rail'),
     bettingRailShared: document.getElementById('betting-rail-shared'),
     raiseCapIndicator: document.getElementById('raise-cap-indicator'), // NEW 9.2 (§6.10)
+    // NEW 12.6 (Part C.3)
+    btnHistoryToggle: document.getElementById('btn-history-toggle'),
+    historyPanel: document.getElementById('history-panel'),
     personalTurnActions: document.getElementById('personal-turn-actions'),
     betAmount: document.getElementById('bet-amount'),
     btnPlaceBet: document.getElementById('btn-place-bet'),
@@ -1632,6 +1684,46 @@
   });
   el.btnHandRanksClose.addEventListener('click', () => el.handRanksDialog.close());
 
+  // ---- Betting history popup (NEW 12.6, Part C.3) ----
+
+  el.btnHistoryToggle.addEventListener('click', () => {
+    state.historyOpen = !state.historyOpen;
+    renderHistoryPanel(state.lastGameTable);
+  });
+
+  /**
+   * Toggle visibility follows gameTable.streetActionLog directly --
+   * only appears once there's actually something to show. Force-closes
+   * (and the panel's own content is cleared next render regardless,
+   * since the log itself is empty again by then) the moment betting
+   * closes for the street, so it never shows stale information into
+   * the next street -- checked on every call, not just when the toggle
+   * is clicked, since bettingOpen can flip from a broadcast at any
+   * time regardless of what the viewer is doing.
+   */
+  function renderHistoryPanel(gameTable) {
+    const log = gameTable?.streetActionLog || [];
+    el.btnHistoryToggle.hidden = log.length === 0;
+    if (!gameTable?.bettingOpen) state.historyOpen = false;
+
+    el.btnHistoryToggle.classList.toggle('is-open', state.historyOpen);
+    el.btnHistoryToggle.textContent = state.historyOpen ? 'History \u25be' : 'History \u25b8';
+    el.historyPanel.hidden = !state.historyOpen;
+    if (!state.historyOpen) return;
+
+    el.historyPanel.innerHTML = '';
+    log.forEach((entry) => {
+      const line = document.createElement('div');
+      line.className = 'history-entry';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'history-player';
+      nameSpan.textContent = entry.playerName;
+      line.append(nameSpan, document.createTextNode(' ' + entry.text));
+      el.historyPanel.appendChild(line);
+    });
+    el.historyPanel.scrollTop = el.historyPanel.scrollHeight; // auto-scroll to the latest entry
+  }
+
   const HAND_RANKS = [
     { name: 'Royal Flush', cards: [['A', 'spades'], ['K', 'spades'], ['Q', 'spades'], ['J', 'spades'], ['10', 'spades']] },
     { name: 'Straight Flush', cards: [['9', 'hearts'], ['8', 'hearts'], ['7', 'hearts'], ['6', 'hearts'], ['5', 'hearts']] },
@@ -1665,7 +1757,7 @@
     if (rank) {
       const top = document.createElement('div');
       top.className = 'card-index';
-      top.innerHTML = `<span>${rank}</span>`;
+      top.innerHTML = cardTopIndexHtml(rank, suit); // NEW 12.6 (Part E): shares the same embellishment logic as renderCard()
       const center = document.createElement('div');
       center.className = 'card-suit-glyph';
       center.textContent = glyph;
@@ -1841,7 +1933,10 @@
         button.textContent = preset.displayName; // v4.2: one line per game, no description sub-line
         button.addEventListener('click', () => {
           hideTableError();
-          state.pendingAutoOpenOptions = true; // Select auto-opens Options once this lands (§10.4)
+          // REMOVED 12.6 (Part D): pendingAutoOpenOptions removed -- the
+          // Select-triggered open now falls out naturally from the
+          // universal per-client gameChoiceId-change check in
+          // renderGameRail() below, same as every other player's does.
           send('setGameChoice', { gameChoiceId: preset.id });
           el.selectDialog.close();
         });
@@ -2471,9 +2566,28 @@
 
     el.btnOpenOptionsDialog.disabled = !gameTable.gameOptions;
 
-    // v4.1: Select auto-opens Options once the new choice actually lands.
-    if (state.pendingAutoOpenOptions && gameTable.gameChoiceId) {
-      state.pendingAutoOpenOptions = false;
+    // CHANGED 12.6 (Part D): universal, per-client check -- replaces the
+    // old pendingAutoOpenOptions local flag, which only ever fired for
+    // whichever client had just clicked Select. renderGameRail() runs
+    // unconditionally for every client on every render (see this
+    // function's own doc comment above), so this now fires identically
+    // for the Dealer and every other player. Read-only for everyone
+    // except the idle Dealer, exactly matching the dialog's existing
+    // editable/read-only rule in renderOptionsDialogFields() itself --
+    // no separate permission logic needed here.
+    //
+    // The first gameChoiceId a client ever observes is treated as a
+    // baseline, not a change -- specifically so a player joining or
+    // reconnecting into an already-in-progress table doesn't get the
+    // dialog force-opened on arrival. Only a genuine, live change from
+    // that point forward triggers the auto-open. Confirmed
+    // non-disruptive timing: setGameChoice() requires the table to be
+    // idle, so this can only ever fire between hands, never
+    // interrupting anyone mid-action in a live hand.
+    if (state.lastSeenGameChoiceId === undefined) {
+      state.lastSeenGameChoiceId = gameTable.gameChoiceId || null; // baseline only, no open
+    } else if (gameTable.gameChoiceId && gameTable.gameChoiceId !== state.lastSeenGameChoiceId) {
+      state.lastSeenGameChoiceId = gameTable.gameChoiceId;
       renderOptionsDialogFields(gameTable, isDealer);
       if (!el.optionsDialog.open) el.optionsDialog.showModal();
     } else if (el.optionsDialog.open) {
@@ -2715,8 +2829,23 @@
           if (Number.isNaN(n)) n = c.min ?? 0;
           if (c.min !== undefined) n = Math.max(c.min, n);
           if (c.max !== undefined) n = Math.min(c.max, n);
-          raw = String(n);
-          input.value = raw;
+          // FIXED 12.6 (Part A): only reassign .value when the clamp
+          // actually changes something. Unconditionally rewriting it
+          // even to the identical value -- which every ordinary commit
+          // did before, including a plain spinner click, since that
+          // fires the same 'change' event as typing -- is a known
+          // source of flaky native spinner behavior (confirmed live:
+          // Small Blind occasionally ending up greater than Big Blind).
+          // Reassigning a number input's own .value from inside its
+          // own change handler can desync the browser's internal
+          // notion of "current value" from what's actually displayed,
+          // corrupting the next spinner click. Worth keeping regardless
+          // of whether a spinner is visible (see the CSS fix below) --
+          // it removes an unnecessary write to the input's internals
+          // either way.
+          const clamped = String(n);
+          if (clamped !== raw) input.value = clamped;
+          raw = clamped;
         }
         const sendValue = Array.isArray(value) ? raw.split(',').map((s) => s.trim()).filter(Boolean) : raw;
         send('setGameOption', { key, value: sendValue });
@@ -3369,6 +3498,7 @@
   }
 
   function renderBettingRail(gameTable, me) {
+    renderHistoryPanel(gameTable); // NEW 12.6 (Part C.3): kept in sync with every render, not just clicks
     // CHANGED 10.1: `currentTurnPlayerId` is already fully
     // server-authoritative -- only ever set to a Player _canAct() itself
     // approved (_nextTurnPlayerId()). Re-checking folded/sittingOut here
@@ -3481,7 +3611,9 @@
       //      viewer with money outstanding who isn't up yet --
       //      restyled from a lower-case parenthetical aside to three
       //      explicit, slash-separated, Title Case segments:
-      //      "$X To Player [Name] / $Y To You / Current Bet: $Z".
+      //      "$X To [Name] / $Y To You / Current Bet: $Z" (CHANGED
+      //      12.6, Part B: dropped the redundant "Player" -- a real
+      //      name already follows it, so the word added nothing).
       //
       // Stud's unresolved Bring-In obligation still swaps the aside's
       // label ("bring in"/"Bring In" instead of "current bet"/"Current
@@ -3501,7 +3633,7 @@
         el.bettingRailShared.append(lead, document.createTextNode(` (${asideLabel}: $${gameTable.currentBetToCall})`));
       } else {
         const toThem = Math.max(0, gameTable.currentBetToCall - turnPlayer.currentBet);
-        lead.textContent = `$${toThem} To Player ${turnPlayer.name}`;
+        lead.textContent = `$${toThem} To ${turnPlayer.name}`;
         el.bettingRailShared.append(
           lead,
           document.createTextNode(` / $${toYou} To You / ${asideLabelTitleCase}: $${gameTable.currentBetToCall}`)
@@ -4336,7 +4468,7 @@
 
     const top = document.createElement('div');
     top.className = 'card-index';
-    top.innerHTML = `<span>${rankLabel}</span>`;
+    top.innerHTML = cardTopIndexHtml(rankLabel, card.suit); // NEW 12.6 (Part E): may include a one-eyed-jack/suicide-king icon
 
     const center = document.createElement('div');
     center.className = 'card-suit-glyph';

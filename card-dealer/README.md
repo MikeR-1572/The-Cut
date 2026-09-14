@@ -1,11 +1,104 @@
-# The Cut — Card Dealing & Betting Engine (v12.5)
+# The Cut — Card Dealing & Betting Engine (v12.6)
 
-**Ante Bug, Options Race Condition, Dropdown Colors, Hand Ranks Dialog**
-— built from `the-cut-spec_v12-5.md`. **Not cosmetic-only** — Parts A
-and B are real server/client gameplay-logic fixes found live during
-Mike's own testing. `npm test` — **449 tests** (Part A adds one
-permanent regression test), confirmed clean across 30+ consecutive
-full-suite runs.
+**Blind Spinner Fix, Betting History, Options Auto-Open for Everyone,
+Card Flourishes** — built from `the-cut-spec_v12-6.md`. Mostly
+cosmetic/UX, with one genuine behavior change (Part C) that's still
+low-risk — client-side rendering plus an additive server-side log, no
+existing betting/dealing logic touched. `npm test` — **449 tests**
+(unchanged — Part C's data model is additive to functions that
+already existed; no new `GameTable`-level behavior needing its own
+test beyond the direct reproduction/verification described below).
+
+### Part A — Hold'em Small/Big Blind spinner producing unexpected values
+
+Since 12.4, every commit on a numeric field with a min/max constraint
+unconditionally rewrote the input's own `.value`, even when nothing
+needed correcting — including a plain spinner click, which fires the
+same `change` event as typing. Reassigning a number input's `.value`
+from inside its own change handler is a known source of exactly this
+kind of flaky spinner behavior (confirmed live: Small Blind
+occasionally ending up greater than Big Blind). Fixed to only touch
+`.value` when the clamp actually changes something; verified in
+isolation (normal spinner clicks and already-valid typed values now
+correctly cause zero reassignment, out-of-range values still get
+corrected). Per Mike's direct preference, spinner arrows are also now
+hidden via CSS on every numeric field in the app, not just Hold'em's
+blinds — fields stay `type="number"`, only the spinner control itself
+is hidden.
+
+### Part B — Betting-rail wording: drop "Player" before the name
+
+`$X To Player [Name]` → `$X To [Name]` — confirmed no other
+occurrences of the old wording exist anywhere else in the codebase.
+
+### Part C — Per-street betting history
+
+Direct beta pain point: "who raised it $25?" with 5+ players and
+several raises in one round. New `this.streetActionLog` (server),
+reset in both `openBetting()` and `_performFullReset()` and
+initialized in the constructor, appended to from `placeBet()` (bet vs.
+"raised to," reusing the existing `wasOpeningBet` distinction),
+`call()` (the amount actually added, matching the Call button's own
+label), `allIn()`, `check()`, and specifically the normal turn-gated
+`fold()` path only. Confirmed by directly forcing both the
+Showdown/Declare fold branch and the deal-interrupt fold branch (not
+just reading the code) that neither touches the log. Exposed
+unredacted in `toRedactedState()` — always public, same as every
+action's own return value already was the moment it happened.
+
+Client: a "History ▸" toggle in the betting rail's corner, only
+visible once there's something to show, opening a scrollable popup
+panel (not a sidebar — the rail has no room to slide sideways) that
+auto-scrolls to the latest entry and force-closes the instant betting
+closes for the street. Verified in isolation across four scenarios:
+empty log stays hidden, non-empty log shows the toggle with the panel
+closed by default, an opened panel renders every entry correctly, and
+a street closing force-closes the panel even if it was open.
+
+Server-side reproduction (bet → raise → call → fold, correct
+name/amount throughout) and the full suite both confirmed clean across
+25 consecutive stress runs.
+
+### Part D — Options dialog now auto-opens for every player
+
+The old mechanism (`pendingAutoOpenOptions`) was a purely local flag
+set only inside Select's own click handler — no other player's dialog
+ever opened automatically, confirmed as the actual cause of Mike
+having to verbally remind players to check Options themselves.
+Replaced entirely (old flag removed, confirmed no leftover references
+anywhere) with a universal per-client check in `renderGameRail()`,
+which already runs unconditionally for every client on every render: 
+the first `gameChoiceId` a client observes is a baseline, not a
+change, so joining or reconnecting into an already-in-progress table
+doesn't force the dialog open — only a genuine, later change does.
+Verified in isolation across four scenarios (joining an active table,
+a genuine change, a fresh table with no game picked yet, and the
+first-ever pick at a fresh table) — all behaved exactly as intended.
+`setGameChoice()` requires the table to be idle, so this can only ever
+fire between hands.
+
+### Part E — Card flourishes: one-eyed jacks and the suicide king
+
+A small eye icon (J♠/J♥) or dagger icon (K♥) sits next to the rank
+letter in a card's top-left corner only — the rotated bottom index is
+left alone, to avoid cluttering a card this small. One shared function
+(`cardEmbellishment()`/`cardTopIndexHtml()`) used by both `renderCard()`
+and the Hand Ranks reference dialog's `buildHandRanksCard()`, so the
+two can't drift apart. Icons use `currentColor` (follows the card's
+existing black/red ink automatically) and are sized in `em` units so
+they scale correctly across every card-size context in the app.
+Confirmed the embellishment logic fires only for the correct three
+rank/suit combinations across 11 test cases, and that the actual SVG
+markup parses correctly in a real DOM. **Caught and fixed a real
+sizing bug before it shipped**: the eye icon (16:10 viewBox) and the
+dagger (16:6) have different aspect ratios — an initial fixed
+width+height pairing would have stretched the dagger to match the
+eye's proportions; fixed to height-only sizing with `width: auto` so
+each icon keeps its own native shape.
+
+---
+
+## v12.5 — Ante Bug, Options Race Condition, Dropdown Colors, Hand Ranks Dialog
 
 ### Part A — Folded player charged an uncollectable ante on a re-ante New Hand
 

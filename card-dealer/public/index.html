@@ -323,6 +323,16 @@
     </div>
 
     <section class="betting-rail" id="betting-rail" hidden>
+      <!-- NEW 12.6 (Part C.3): only appears once there's actually
+           something to show (gameTable.streetActionLog.length > 0).
+           Popup panel, not a sidebar like the Player Rail's -- the
+           betting rail itself is a short horizontal bar with no room
+           to slide sideways. Force-closes and clears the moment
+           betting closes for the street (see renderHistoryPanel() in
+           client.js), so it never shows stale information into the
+           next street. -->
+      <button type="button" class="history-toggle" id="btn-history-toggle" hidden title="This street's betting history">History &#9656;</button>
+      <div class="history-panel" id="history-panel" hidden></div>
       <div class="betting-rail-shared" id="betting-rail-shared"></div>
       <!-- NEW 9.2 (§6.10): persistent, not a fading toast -- true for the
            rest of the betting round once the raise cap is reached. -->

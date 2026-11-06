@@ -94,6 +94,8 @@ const ACTION_METHODS = {
   drawCard: 0,
   passDraw: 0,
   showAll: 0,
+  // NEW 13.1
+  restoreDefaultOptions: 0,
 };
 
 /**

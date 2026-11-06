@@ -466,7 +466,7 @@ test('Betting: a Bet/Raise for the player\'s entire stack is rejected -- must us
   assert.strictEqual(room.placeBet('p2', 150).ok, false); // exceeds their own stack entirely
   const fullStack = room.placeBet('p2', 100); // exactly their entire stack -- Option B, must use All-In
   assert.strictEqual(fullStack.ok, false);
-  assert.match(fullStack.error, /All-In/);
+  assert.match(fullStack.error, /All In/); // CHANGED 13.1 (A.4): one "All In" spelling
   const belowStack = room.placeBet('p2', 80);
   assert.strictEqual(belowStack.ok, true);
   assert.strictEqual(room.getPlayer('p2').chips, 20);

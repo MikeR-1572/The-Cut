@@ -138,7 +138,8 @@ test('13.0 E.4: Pick-a-Card range is enforced; the drawn card is the one at that
   assert.strictEqual(got.faceUp, true, 'When Drawn = face up');
 });
 
-test('13.0 E.4: Pick-a-Card Reveal = At Showdown draws face down, then every card turns up once the last player draws', () => {
+// CHANGED 13.1 (E.2): no automatic turn-up at Showdown -- players use Show Cards.
+test('13.0 E.4: Pick-a-Card Reveal Pick = At Showdown draws face down; no automatic turn-up; Show Cards reveals with faceUp unchanged', () => {
   const room = roomFor('home-pick-a-card', ['A', 'B', 'C'], { anteAmount: 1, reveal: 'at-showdown' });
   room.pickCard(room.pickTurnPlayerId, 1);
   const first = room.players.find((p) => p.hand.length === 1);
@@ -146,7 +147,11 @@ test('13.0 E.4: Pick-a-Card Reveal = At Showdown draws face down, then every car
   assert.deepStrictEqual(room.toRedactedState('p1').players.find((p) => p.id === first.id).hand, [{ faceUp: false }]);
   while (room.handPhase === 'PickDraw') room.pickCard(room.pickTurnPlayerId, 1);
   assert.strictEqual(room.handPhase, 'Showdown');
-  for (const p of room.players) assert.strictEqual(p.hand[0].faceUp, true);
+  for (const p of room.players) assert.strictEqual(p.hand[0].faceUp, false, 'still face down after the last draw');
+  assert.ok(room.revealHand('p2').ok);
+  const seen = room.toRedactedState('p3').players.find((p) => p.id === 'p2').hand[0];
+  assert.strictEqual(seen.id, room.getPlayer('p2').hand[0].id, 'visible to everyone once shown');
+  assert.strictEqual(seen.faceUp, false, 'still marked as dealt down (green dot)');
 });
 
 test('13.0 C.2: Pick-a-Card has no deal and no betting', () => {
@@ -233,8 +238,8 @@ test('13.0 E.6: Initial Reveal -- zero cards rejected; selection private until a
 
 // ---- 7-8. Frozen, no-draw rounds -----------------------------------
 
-test('13.0 E.7: two passes in a row freeze; a draw in between resets; frozen players still bet, declare and claim', () => {
-  const room = vyingAtInitialBetting('home-7-27', ['A', 'B', 'C']);
+test('13.0 E.7: two passes in a row freeze (Freeze After = 2); a draw in between resets; frozen players still bet, declare and claim', () => {
+  const room = vyingAtInitialBetting('home-7-27', ['A', 'B', 'C'], { freezeAfter: 2 }); // CHANGED 13.1: default is now 3
   room.openBetting('p1');
   checkAround(room);
   // Round 1: p2 passes, others draw.
@@ -375,7 +380,7 @@ test('13.0 E.11: Folded Hands "muck" removes the folded cards; "leave" keeps the
   assert.deepStrictEqual(leave.getPlayer('p3').hand.map((c) => `${c.id}:${c.faceUp}`), before);
 });
 
-test('13.0 E.11: Show All -- only with "leave", only after the claim is approved; turns every face-down card up', () => {
+test('13.0 E.11: Show All -- only with "leave", only after the claim is approved; reveals every hand', () => {
   const room = vyingAtInitialBetting('home-7-27', ['A', 'B', 'C']);
   room.openBetting('p1');
   room.placeBet('p2', 1);
@@ -389,8 +394,11 @@ test('13.0 E.11: Show All -- only with "leave", only after the claim is approved
   room.resolveClaim(room.pendingClaim.approverId, true);
   assert.strictEqual(room.toRedactedState('p2').showAllAvailable, true);
   assert.strictEqual(room.showAll('p2').ok, false, 'Dealer only');
+  const faceUpBefore = room.players.map((p) => p.hand.map((c) => c.faceUp));
   assert.ok(room.showAll('p1').ok);
-  for (const p of room.players) for (const c of p.hand) assert.strictEqual(c.faceUp, true);
+  // CHANGED 13.1 (E.1): every hand revealed; faceUp untouched (keeps the dealt-down dot).
+  for (const p of room.players) assert.strictEqual(p.revealed, true);
+  assert.deepStrictEqual(room.players.map((p) => p.hand.map((c) => c.faceUp)), faceUpBefore);
   assert.strictEqual(room.toRedactedState('p1').showAllAvailable, false, 'gone once used');
 
   const muck = vyingAtInitialBetting('home-7-27', ['A', 'B'], { foldedHands: 'muck' });
@@ -484,7 +492,7 @@ test('13.0 E.14: existing presets are unaffected -- profiles, phase entry, and n
 });
 
 test('13.0 E.7b: frozen and the pass count are cleared at the start of the next hand', () => {
-  const room = vyingAtInitialBetting('home-7-27', ['A', 'B', 'C']);
+  const room = vyingAtInitialBetting('home-7-27', ['A', 'B', 'C'], { freezeAfter: 2 }); // CHANGED 13.1: default is now 3
   room.openBetting('p1');
   checkAround(room);
   playDrawRound(room, (p) => (p.id === 'p3' ? 'pass' : 'draw'));

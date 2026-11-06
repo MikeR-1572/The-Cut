@@ -366,6 +366,9 @@ wss.on('connection', (ws, req) => {
         return handleNewGameAction(ws, (t, id) => t.passDraw(id));
       case 'showAll':
         return handleNewGameAction(ws, (t, id) => t.showAll(id));
+      // NEW 13.1 (the-cut-spec_v13-1.md Part F)
+      case 'restoreDefaultOptions':
+        return handleNewGameAction(ws, (t, id) => t.restoreDefaultOptions(id));
       case 'payDealInterrupt':
         return handlePayDealInterrupt(ws);
       case 'buyDealInterrupt':

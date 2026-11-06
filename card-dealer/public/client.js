@@ -80,9 +80,10 @@
     // REMOVED 12.6 (Part D): pendingAutoOpenOptions removed -- was a
     // purely local flag set only inside Select's own click handler, so
     // no OTHER player's dialog ever opened automatically. Replaced by
-    // lastSeenGameChoiceId below, a universal per-client check that
+    // lastSeenGameChoiceSeq below (13.1; was lastSeenGameChoiceId), a universal per-client check that
     // works the same way for every viewer, Dealer or not.
-    lastSeenGameChoiceId: undefined, // NEW 12.6 (Part D): baseline set on first observation, not treated as a change
+    lastSeenGameChoiceSeq: undefined, // CHANGED 13.1 (D.1), was lastSeenGameChoiceId (12.6 Part D): baseline set on first observation, not treated as a change
+    pendingRestoreRecompute: false, // NEW 13.1 (Part F): re-run pushComputedBets() once the restored defaults arrive
     wasShowingTurnActions: false, // NEW 5.1 (bug fix) -- edge-triggered Bet/Raise box clearing; see renderBettingRail
     myReconnectCode: null, // NEW 11.0 (Part D) -- this Player's own code, shown so they don't have to ask the Host for it
     isReconnect: false, // NEW 11.2 (Fix 6) -- set from the 'joined' message's own field
@@ -328,6 +329,7 @@
     optionsWildcardRow: document.getElementById('options-wildcard-row'),
     btnOptionsConfirm: document.getElementById('btn-options-confirm'),
     btnOptionsCancel: document.getElementById('btn-options-cancel'), // NEW 10.4 (Part C)
+    btnOptionsRestore: document.getElementById('btn-options-restore'), // NEW 13.1 (Part F)
     optionsGameName: document.getElementById('options-game-name'), // NEW 8.2 (§10.5)
     btnOptionsRules: document.getElementById('btn-options-rules'), // NEW 8.2 (§10.5)
 
@@ -1508,7 +1510,7 @@
     if (gameTable?.reAnteable) {
       const proceed = await appConfirm(
         "This is a re-ante game \u2014 if this hand doesn't reach a conclusion, a new hand may be dealt and you won't have enough chips to cover the new ante. You'll be excluded from that deal if it happens. Go All-In anyway?",
-        { confirmLabel: 'Go All-In', cancelLabel: 'Cancel' }
+        { confirmLabel: 'Go All In', cancelLabel: 'Cancel' }
       );
       if (!proceed) return;
     }
@@ -1801,7 +1803,10 @@
    */
   function renderHistoryPanel(gameTable) {
     const log = gameTable?.streetActionLog || [];
-    el.btnHistoryToggle.hidden = log.length === 0;
+    // CHANGED 13.1 (C.3): only while a betting round is open -- the log
+    // lingers until the next openBetting(), and the Drawing Rail lives in
+    // the same rail, so the button used to show on it.
+    el.btnHistoryToggle.hidden = !gameTable?.bettingOpen || log.length === 0;
     if (!gameTable?.bettingOpen) state.historyOpen = false;
 
     el.btnHistoryToggle.classList.toggle('is-open', state.historyOpen);
@@ -2137,6 +2142,16 @@
   // supports being called again at any time while idle, and nothing is
   // committed by merely having viewed Options -- the hand only actually
   // begins on the separate, explicit Start action.
+  // NEW 13.1 (Part F): Restore Defaults -- the server resets this game's
+  // options to the catalog defaults; once that state arrives, the
+  // dependent computed values (12.3 Small Bet/Big Bet) are re-sent so the
+  // restored set is consistent.
+  el.btnOptionsRestore.addEventListener('click', () => {
+    hideTableError();
+    state.pendingRestoreRecompute = true;
+    send('restoreDefaultOptions');
+  });
+
   el.btnOptionsCancel.addEventListener('click', () => {
     el.optionsDialog.close();
     buildSelectIndex();
@@ -2704,15 +2719,23 @@
     // non-disruptive timing: setGameChoice() requires the table to be
     // idle, so this can only ever fire between hands, never
     // interrupting anyone mid-action in a live hand.
-    if (state.lastSeenGameChoiceId === undefined) {
-      state.lastSeenGameChoiceId = gameTable.gameChoiceId || null; // baseline only, no open
-    } else if (gameTable.gameChoiceId && gameTable.gameChoiceId !== state.lastSeenGameChoiceId) {
-      state.lastSeenGameChoiceId = gameTable.gameChoiceId;
+    // CHANGED 13.1 (D.1): keyed on the server's gameChoiceSeq (bumped on
+    // every successful Select) instead of the id, so re-picking the game
+    // just played opens Options too. Same first-observation baseline.
+    if (state.lastSeenGameChoiceSeq === undefined) {
+      state.lastSeenGameChoiceSeq = gameTable.gameChoiceSeq || 0; // baseline only, no open
+    } else if (gameTable.gameChoiceId && gameTable.gameChoiceSeq !== state.lastSeenGameChoiceSeq) {
+      state.lastSeenGameChoiceSeq = gameTable.gameChoiceSeq;
       renderOptionsDialogFields(gameTable, isDealer);
       if (!el.optionsDialog.open) el.optionsDialog.showModal();
     } else if (el.optionsDialog.open) {
       // Keep an already-open Options dialog's read-only values in sync.
       renderOptionsDialogFields(gameTable, isDealer);
+    }
+    // NEW 13.1 (Part F): after Restore Defaults, recompute dependent values once.
+    if (state.pendingRestoreRecompute) {
+      state.pendingRestoreRecompute = false;
+      if (isDealer && gameTable.idle) pushComputedBets(gameTable);
     }
   }
 
@@ -2743,13 +2766,14 @@
     extraCardUpOrDown: 'Extra Card Dealt', // NEW 8.1
     audible: "Dealer's Audible", // NEW 8.1 (§3) -- universal free-text table talk
     // NEW 13.0 (spec C.1/D.1)
-    fixedBet: 'Fixed Bet Amount',
-    reveal: 'Reveal',
+    fixedBet: 'Fixed Bet', // CHANGED 13.1 (A.1), was "Fixed Bet Amount"
+    reveal: 'Reveal Pick', // CHANGED 13.1 (A.3), was "Reveal"
     initialDeal: 'Initial Deal',
     drawCardsDealt: 'Draw Cards Dealt',
+    freezeAfter: 'Freeze After', // NEW 13.1 (B.3)
     overUnder: 'Over / Under',
-    naturalsWin: 'Naturals Win Automatically',
     foldedHands: 'Folded Hands',
+    // REMOVED 13.1 (B.1): naturalsWin.
   };
   function optionDisplayLabel(key) {
     if (OPTION_DISPLAY_LABELS[key]) return OPTION_DISPLAY_LABELS[key];
@@ -2790,8 +2814,11 @@
     initialDeal: ['2-down-0-reveal', '2-down-1-reveal', '3-down-1-reveal'],
     drawCardsDealt: ['down', 'up'],
     overUnder: ['over-busts', 'under-trumps', 'nearest'],
-    naturalsWin: ['yes', 'no'],
     foldedHands: ['muck', 'leave'],
+    // NEW 13.1 (B.3): numbers stored as numbers, Never as "never" --
+    // buildOptionField() converts the <select>'s string back on send.
+    freezeAfter: [2, 3, 4, 5, 'never'],
+    // REMOVED 13.1 (B.1): naturalsWin.
   };
 
   /** NEW 13.0 (spec C.1/D.1): dropdown text for the new games' options, per stored value. */
@@ -2802,8 +2829,10 @@
     // "Under Trumps Over" per Mike (13.0 dev review), replacing the
     // proto-spec's "Under Trumps Lower".
     overUnder: { 'over-busts': 'Over is a Bust', 'under-trumps': 'Under Trumps Over', nearest: 'Nearest Wins' },
-    naturalsWin: { yes: 'Yes', no: 'No' },
-    foldedHands: { muck: 'Mucked', leave: 'Left on Table' },
+    // CHANGED 13.1 (A.2): "Mucked" -> "Mucked on Fold". REMOVED 13.1 (B.1): naturalsWin.
+    foldedHands: { muck: 'Mucked on Fold', leave: 'Left on Table' },
+    // NEW 13.1 (B.3)
+    freezeAfter: { 2: '2 Skipped Draws', 3: '3 Skipped Draws', 4: '4 Skipped Draws', 5: '5 Skipped Draws', never: 'Never Freeze' },
   };
 
   /** NEW 9.1 (§10.5): dropdown display text for bettingStructure's raw stored values. */
@@ -2938,13 +2967,16 @@
         const option = document.createElement('option');
         option.value = enumValue;
         option.textContent = optionValueLabel(key, enumValue);
-        if (enumValue === value) option.selected = true;
+        if (String(enumValue) === String(value)) option.selected = true; // CHANGED 13.1: numeric enum values (Freeze After)
         input.appendChild(option);
       }
       input.value = value;
       input.addEventListener('change', () => {
         hideTableError();
-        send('setGameOption', { key, value: input.value });
+        // NEW 13.1 (B.3): a <select> always yields a string; Freeze After
+        // stores 2-5 as numbers, so convert back before sending.
+        const sendValue = key === 'freezeAfter' && input.value !== 'never' ? Number(input.value) : input.value;
+        send('setGameOption', { key, value: sendValue });
         if (opts.onCommitAlso) opts.onCommitAlso(input.value);
       });
     } else {
@@ -3159,6 +3191,7 @@
     // -- backing out to pick a different game before the hand exists is
     // meaningless once Options is in its read-only ("Close") state.
     el.btnOptionsCancel.hidden = !editable;
+    el.btnOptionsRestore.hidden = !editable; // NEW 13.1 (Part F): same rule as Cancel
 
     if (!gameTable.gameOptions) {
       el.optionsLimitsFields.innerHTML = '';
@@ -3328,10 +3361,10 @@
    * 15-35, built from the same buildOptionField() as every other game.
    *   Limits:        Raise Cap only (vying). No Betting Structure (it's
    *                  fixed in hiddenOptions), no Max Discards.
-   *   Antes & Bets:  Ante Amount + Fixed Bet Amount (vying); Ante only (Pick-a-Card).
+   *   Antes & Bets:  Ante Amount + Fixed Bet (vying); Ante only (Pick-a-Card).
    *   Game row:      the row Baseball's wild-card options use -- Initial
-   *                  Deal, Draw Cards Dealt, Over / Under, Naturals Win
-   *                  Automatically, Folded Hands (vying); Reveal (Pick-a-Card).
+   *                  Deal, Draw Cards Dealt, Freeze After, Over / Under,
+   *                  Folded Hands (vying); Reveal Pick (Pick-a-Card).
    * The computed Small Bet/Big Bet fields don't exist for these games, so
    * their element references are cleared (refreshOptionsConditionalFields()
    * and pushComputedBets() then have nothing to touch). The in-place
@@ -3362,7 +3395,8 @@
     if (present('audible')) el.optionsLowhandRow.appendChild(buildOptionField(gameTable, 'audible', editable, { wide: true }));
 
     el.optionsWildcardRow.innerHTML = '';
-    const gameKeys = isVying ? ['initialDeal', 'drawCardsDealt', 'overUnder', 'naturalsWin', 'foldedHands'] : ['reveal'];
+    // CHANGED 13.1: Freeze After added after Draw Cards Dealt (B.3); Naturals removed (B.1).
+    const gameKeys = isVying ? ['initialDeal', 'drawCardsDealt', 'freezeAfter', 'overUnder', 'foldedHands'] : ['reveal'];
     const grid = document.createElement('div');
     grid.className = 'options-field-grid';
     for (const key of gameKeys) {
@@ -3702,6 +3736,22 @@
     el.claimBannerActions.hidden = !isApprover;
   }
 
+  /** NEW 13.1 (C.1): "[Name] Is Drawing" / "[Name] Is Picking a Card", or null. */
+  function drawPickWaitingText(gameTable) {
+    let turnId = null;
+    let verb = '';
+    if (gameTable.profile === 'vying' && gameTable.handPhase === 'DrawRound' && gameTable.drawRoundOpen) {
+      turnId = gameTable.drawTurnPlayerId;
+      verb = 'Is Drawing';
+    } else if (gameTable.profile === 'pickcard' && gameTable.handPhase === 'PickDraw') {
+      turnId = gameTable.pickTurnPlayerId;
+      verb = 'Is Picking a Card';
+    }
+    if (!turnId || turnId === state.playerId) return null;
+    const turnPlayer = gameTable.players.find((p) => p.id === turnId);
+    return turnPlayer ? `${turnPlayer.name} ${verb}` : null;
+  }
+
   function renderBettingRail(gameTable, me) {
     renderHistoryPanel(gameTable); // NEW 12.6 (Part C.3): kept in sync with every render, not just clicks
     // CHANGED 10.1: `currentTurnPlayerId` is already fully
@@ -3801,7 +3851,8 @@
       showDeclareAction ||
       showPickAction ||
       showRevealAction ||
-      showDrawAction
+      showDrawAction ||
+      !!drawPickWaitingText(gameTable) // NEW 13.1 (C.1): the shared line needs the rail visible
     );
 
     if (gameTable.bettingOpen) {
@@ -3891,6 +3942,15 @@
     } else {
       el.bettingRailShared.textContent = '';
       el.raiseCapIndicator.hidden = true;
+      // NEW 13.1 (C.1): the drawing/picking turn, on the same shared line
+      // betting uses, for everyone except the turn-holder (who sees their
+      // own rail). Names come from the server's turn ids, never derived.
+      const waitingLine = drawPickWaitingText(gameTable);
+      if (waitingLine) {
+        const lead = document.createElement('strong');
+        lead.textContent = waitingLine;
+        el.bettingRailShared.append(lead);
+      }
     }
 
     // BUG FIX (5.1 §10.2, logged in the spec as unresolved -- root cause
@@ -4119,7 +4179,11 @@
         // reason the button might be unusable (betWouldBeAllIn/
         // raiseCapReached), where "(use All In)" or a plain disabled
         // state remains the right label.
-        el.btnPlaceBet.textContent = betExceedsOpponentCeiling ? verb : betUnusable ? `${verb} (use All In)` : verb;
+        // CHANGED 13.1 (D.2): "(use All In)" only when going All In is the
+        // actual way forward (betWouldBeAllIn). A reached raise cap blocks
+        // All In just the same, so it shows the plain verb; the tooltip
+        // below explains why.
+        el.btnPlaceBet.textContent = betWouldBeAllIn && !betExceedsOpponentCeiling ? `${verb} (use All In)` : verb;
       }
       el.btnPlaceBet.title = betWouldBeAllIn
         ? 'Any legal bet/raise here would commit your entire stack \u2014 use All In instead.'
@@ -4525,7 +4589,7 @@
       // they contributed to.
       const allInBadge = document.createElement('span');
       allInBadge.className = 'seat-allin-badge';
-      allInBadge.title = `${player.name} is all in this hand`;
+      allInBadge.title = `${player.name} is All In this hand`;
       allInBadge.textContent = 'All In';
       info.appendChild(allInBadge);
     }
@@ -5141,6 +5205,9 @@
 
     // NEW 13.0 (spec D.2): Open Drawing Round -- vying only (railTables.js).
     el.openDrawingGroup.hidden = !view.openDrawing?.visible;
+    // NEW 13.1 (C.2): "Open 1st/2nd/3rd... Drawing Round" -- same server
+    // counter and ordinal helper as the "Nth Draw" banner.
+    el.btnOpenDrawing.textContent = `Open ${ordinal(gameTable.drawRoundNumber || 1)} Drawing Round`;
 
     // Stud's Select Opening Bettor (\u00a76.8). Never applies to Draw/Hold'em.
     el.openingBettorGroup.hidden = !view.openingBettor?.visible;

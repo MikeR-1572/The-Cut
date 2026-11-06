@@ -44,7 +44,7 @@ test('11.4 Part D.2: the original All-In-suggesting message is kept when a SMALL
 
   const result = room._validateBetOrRaise(d, 60); // tries to jump straight to $110 cumulative -- too much
   assert.strictEqual(result.ok, false);
-  assert.ok(/use All-In/.test(result.error), `expected the original All-In-suggesting message, got: ${result.error}`);
+  assert.ok(/use All In/.test(result.error) /* CHANGED 13.1 (A.4) */, `expected the original All-In-suggesting message, got: ${result.error}`);
 
   // Confirm a genuinely smaller bet (within the remaining headroom) is
   // still actually legal -- proves the message wasn't just optimistic.

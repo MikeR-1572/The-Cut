@@ -1760,6 +1760,7 @@ select option {
   padding-top: 14px;
   border-top: 1px solid rgba(201, 163, 92, 0.2);
 }
+.options-dialog-actions-left, /* NEW 13.1 (Part F): Game Rules + Restore Defaults */
 .options-dialog-actions-right {
   display: flex;
   gap: 10px;

@@ -20,9 +20,12 @@ const ENUM_OPTION_VALUES_13_0 = {
   initialDeal: ['2-down-0-reveal', '2-down-1-reveal', '3-down-1-reveal'],
   drawCardsDealt: ['down', 'up'],
   overUnder: ['over-busts', 'under-trumps', 'nearest'],
-  naturalsWin: ['yes', 'no'],
   foldedHands: ['muck', 'leave'],
+  // REMOVED 13.1 (Part B.1): naturalsWin.
 };
+
+/** NEW 13.1 (Part B.3): every value Freeze After accepts. */
+const FREEZE_AFTER_VALUES = [2, 3, 4, 5, 'never'];
 
 // Beta-window escape hatch, added for 11.4 (the-cut-spec_v11-4.md
 // Part D.3). Mike specifically wanted an easy, single-point revert
@@ -252,6 +255,12 @@ class GameTable {
     this.pickTurnPlayerId = null;
     //   shared: Show All (B.3), once per hand.
     this.showAllUsed = false;
+
+    // NEW 13.1 (the-cut-spec_v13-1.md D.1/F): table-lifetime, never reset
+    // per hand. gameChoiceSeq counts successful setGameChoice() calls;
+    // savedOptionsByGame remembers each game's last-started Dealer options.
+    this.gameChoiceSeq = 0;
+    this.savedOptionsByGame = {};
 
     // NEW 10.3 (the-cut-spec_v10-3.md Part A §2): the most recent
     // pre-current-hand bank snapshot (chips/totalBuyIn per player id),
@@ -1336,12 +1345,10 @@ class GameTable {
 
   _finishPickDraw() {
     if (this.handPhase !== 'PickDraw') return;
-    if (this.gameOptions?.reveal === 'at-showdown') {
-      for (const player of this.players) {
-        if (!this._isHandParticipant(player)) continue;
-        for (const card of player.hand) card.faceUp = true;
-      }
-    }
+    // CHANGED 13.1 (Part E.2): no automatic reveal under "At Showdown" --
+    // as in every other game, players show their own card with the seat
+    // Show Cards button (revealHand()), which works in Showdown and in
+    // CycleComplete (the $0-pot path) alike.
     this._setHandPhase('Showdown');
   }
 
@@ -1522,7 +1529,12 @@ class GameTable {
 
   _applyDrawPass(player) {
     player.consecutivePasses += 1;
-    if (player.consecutivePasses >= 2) player.frozen = true;
+    // CHANGED 13.1 (Part B.3): the threshold is the Freeze After option
+    // (2-5 skipped draws, or "never"), no longer hard-coded at 2.
+    const freezeAfter = this.gameOptions?.freezeAfter;
+    if (freezeAfter !== 'never' && player.consecutivePasses >= (Number.isInteger(freezeAfter) ? freezeAfter : 2)) {
+      player.frozen = true;
+    }
     this._advanceDrawTurn();
   }
 
@@ -1564,7 +1576,10 @@ class GameTable {
       this.gameOptions?.foldedHands === 'leave' &&
       this.handPhase === 'CycleComplete' &&
       !this.showAllUsed &&
-      this.players.some((p) => p.hand.some((c) => !c.faceUp))
+      // CHANGED 13.1 (Part E.1): "something still hidden" now means a
+      // hand that isn't revealed yet and still holds a face-down card --
+      // Show All reveals hands rather than turning cards.
+      this.players.some((p) => !p.revealed && p.hand.some((c) => !c.faceUp))
     );
   }
 
@@ -1577,8 +1592,12 @@ class GameTable {
     if (!this._showAllAvailable()) {
       return { ok: false, error: 'Show All is only available after the pot is claimed, with Folded Hands left on the table.' };
     }
+    // CHANGED 13.1 (Part E.1): reveal every hand on the table (folded
+    // hands left on the table included) the way Show Cards does --
+    // player.revealed, not faceUp -- so the client still knows which
+    // cards were dealt down and keeps the green dealt-down dot.
     for (const player of this.players) {
-      for (const card of player.hand) card.faceUp = true;
+      if (player.hand.length > 0) player.revealed = true;
     }
     this.showAllUsed = true;
     return { ok: true };
@@ -3368,18 +3387,68 @@ class GameTable {
       if (this.profile === 'pickcard' && this._dealableActivePlayers().length < MIN_PLAYERS_TO_DEAL) {
         return { ok: false, error: `Need at least ${MIN_PLAYERS_TO_DEAL} active players with chips to start.` };
       }
+      this._saveOptionsForCurrentGame(); // NEW 13.1 (Part F)
       this._enterRequestAntes(true); // clearFolded: true -- a genuine new Cycle
       return { ok: true };
     }
     if (!this.idle) {
       return { ok: false, error: 'You can only start while idle (no hand in progress).' };
     }
+    this._saveOptionsForCurrentGame(); // NEW 13.1 (Part F)
     this._performFullReset({ clearFolded: true });
     // NOTE 11.0: _positionAnchorId() is a no-op passthrough to dealer.id
     // here -- the Part E split only ever gets set for phase-gated
     // profiles (see expireDisconnectGrace()); kept for consistency with
     // every other _autoApplyAnte()/_computeBlindSeats() call site.
     this._autoApplyAnte(this._positionAnchorId());
+    return { ok: true };
+  }
+
+  /**
+   * NEW 13.1 (the-cut-spec_v13-1.md Part F): remember the Dealer-editable
+   * options (the catalog's `dealerOptions` keys only -- hiddenOptions
+   * always come fresh from the catalog) at the moment a hand starts.
+   * Called only on a successful startGame() -- Options -> Start and Same
+   * Game both go through it -- so options edited but never started are
+   * never remembered. Per table, in memory: it belongs to the table, not
+   * a Dealer, so it survives Pass the Buck, and ends when the table does.
+   */
+  _saveOptionsForCurrentGame() {
+    const preset = GAME_CHOICES.find((g) => g.id === this.gameChoiceId);
+    if (!preset || !this.gameOptions) return;
+    const saved = {};
+    for (const key of Object.keys(preset.dealerOptions || {})) {
+      if (Object.prototype.hasOwnProperty.call(this.gameOptions, key)) {
+        saved[key] = JSON.parse(JSON.stringify(this.gameOptions[key]));
+      }
+    }
+    this.savedOptionsByGame[preset.id] = saved;
+  }
+
+  /** NEW 13.1 (Part F): a preset's catalog defaults, as a fresh flat gameOptions object. */
+  _catalogDefaultOptions(preset) {
+    return JSON.parse(JSON.stringify({ ...preset.hiddenOptions, ...preset.dealerOptions }));
+  }
+
+  /**
+   * NEW 13.1 (Part F): the Options window's Restore Defaults. Same gates as
+   * setGameOption(): Dealer only, idle only, no pending claim. Resets
+   * gameOptions to the current game's catalog defaults. Deliberately
+   * leaves savedOptionsByGame alone -- that entry is overwritten the next
+   * time a hand starts.
+   */
+  restoreDefaultOptions(requesterId) {
+    const dealer = this.getDealer();
+    if (!dealer || dealer.id !== requesterId) {
+      return { ok: false, error: 'Only the Dealer can restore the default options.' };
+    }
+    if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+    if (!this.idle) {
+      return { ok: false, error: 'Options can only be edited while idle (no hand in progress).' };
+    }
+    const preset = GAME_CHOICES.find((g) => g.id === this.gameChoiceId);
+    if (!preset) return { ok: false, error: 'Select a Game Choice first.' };
+    this.gameOptions = this._catalogDefaultOptions(preset);
     return { ok: true };
   }
 
@@ -3560,20 +3629,29 @@ class GameTable {
     // prior version: still one flat `gameOptions` object, merged here
     // once at selection time, exactly as `setGameOption` already expects
     // to read/write it.
-    // NEW 12.5 (Part C, documentation only -- no behavior change):
-    // this line unconditionally resets gameOptions to the preset's
-    // stored defaults EVEN if gameChoiceId is already the same preset
-    // that's already active -- there is deliberately no "already the
-    // active game, leave gameOptions alone" check. Confirmed real,
-    // asked-about-live difference from `startGame()` (Same Game),
-    // which never calls setGameChoice at all and so never touches
-    // gameOptions -- whatever was configured for the hand just played
-    // carries over exactly as-is. Selecting the identical game via
-    // Select, by contrast, discards any Dealer customization from the
-    // hand just played. As far as this session can tell, intentional
-    // rather than a bug -- documented here since it was only ever
-    // explained in chat before now.
-    this.gameOptions = { ...preset.hiddenOptions, ...preset.dealerOptions };
+    // CHANGED 13.1 (the-cut-spec_v13-1.md Part F), replacing the 12.5
+    // reset-to-defaults rule: Select starts from the catalog defaults
+    // (hiddenOptions + dealerOptions), then lays this table's remembered
+    // Dealer-option values for this game on top -- saved at the last
+    // successful startGame() of this game (see
+    // _saveOptionsForCurrentGame()). Only keys that still exist in the
+    // catalog's dealerOptions are used, so a renamed or removed option
+    // can't come back. A game not yet played at this table gets its
+    // defaults. Same Game still never calls setGameChoice at all, so it
+    // keeps exactly the configuration just played, as before.
+    this.gameOptions = this._catalogDefaultOptions(preset);
+    const saved = this.savedOptionsByGame[preset.id];
+    if (saved) {
+      for (const key of Object.keys(preset.dealerOptions || {})) {
+        if (Object.prototype.hasOwnProperty.call(saved, key)) {
+          this.gameOptions[key] = JSON.parse(JSON.stringify(saved[key]));
+        }
+      }
+    }
+    // NEW 13.1 (Part D.1): counts every successful Select, including a
+    // re-pick of the game just played, so every client's Options
+    // auto-open fires on it (the id alone doesn't change on a re-pick).
+    this.gameChoiceSeq += 1;
     this.reAnteable = typeof preset.reAnteable === 'boolean' ? preset.reAnteable : DEFAULT_PRESET_FLAGS.reAnteable;
     this.advanceTurnRequired =
       typeof preset.advanceTurnRequired === 'boolean' ? preset.advanceTurnRequired : DEFAULT_PRESET_FLAGS.advanceTurnRequired;
@@ -3628,19 +3706,30 @@ class GameTable {
     // a number, or vice versa). Handled as its own case instead.
     // NEW 13.0 (spec B.2 + Mike's call to make the Ante check global):
     // server-side whole-number validation. Ante Amount (every game) >= 0;
-    // Fixed Bet Amount >= 1. The vying profile's Raise Cap is a whole
+    // Fixed Bet >= 1. The vying profile's Raise Cap is a whole
     // number >= 1 only -- "No Cap" doesn't apply without No-Limit.
     if (key === 'anteAmount' || key === 'fixedBet') {
       const n = Number(value);
       const min = key === 'anteAmount' ? 0 : 1;
       if (!Number.isInteger(n) || n < min) {
-        return { ok: false, error: `${key === 'anteAmount' ? 'Ante Amount' : 'Fixed Bet Amount'} must be a whole number of at least ${min}.` };
+        return { ok: false, error: `${key === 'anteAmount' ? 'Ante Amount' : 'Fixed Bet'} must be a whole number of at least ${min}.` };
       }
       this.gameOptions[key] = n;
       return { ok: true };
     }
     if (key === 'raiseCap' && this.profile === 'vying' && value === 'no-cap') {
       return { ok: false, error: 'Raise Cap must be a whole number of at least 1.' };
+    }
+    // NEW 13.1 (Part B.3): Freeze After -- 2, 3, 4, 5 stored as numbers,
+    // Never as the string "never". The client's <select> sends strings,
+    // so "3" is accepted and stored as the number 3.
+    if (key === 'freezeAfter') {
+      const v = value === 'never' ? 'never' : Number(value);
+      if (!FREEZE_AFTER_VALUES.includes(v)) {
+        return { ok: false, error: 'Freeze After must be 2, 3, 4 or 5 skipped draws, or Never.' };
+      }
+      this.gameOptions[key] = v;
+      return { ok: true };
     }
     // NEW 13.0: the new games' choice options only accept their own listed values.
     if (Object.prototype.hasOwnProperty.call(ENUM_OPTION_VALUES_13_0, key)) {
@@ -4360,7 +4449,7 @@ class GameTable {
     // are rejected outright once they'd do that, whether the player is
     // genuinely short-stacked or simply choosing to shove voluntarily.
     if (amount >= ownStackCap) {
-      return { ok: false, error: 'That would commit your entire stack \u2014 use All-In instead.' };
+      return { ok: false, error: 'That would commit your entire stack \u2014 use All In instead.' };
     }
 
     // NEW 9.1 (§6.10): a Bet/Raise (never All-In, which is deliberately
@@ -4414,7 +4503,7 @@ class GameTable {
         }
         return {
           ok: false,
-          error: `No remaining player could cover a raise beyond $${opponentCeiling} \u2014 use All-In if you want to commit more than that.`,
+          error: `No remaining player could cover a raise beyond $${opponentCeiling} \u2014 use All In if you want to commit more than that.`,
         };
       }
     }
@@ -4634,7 +4723,7 @@ class GameTable {
     // unchanged, since Bring-In is just a seeded currentBetToCall like
     // any other.
     if (owed >= player.chips) {
-      return { ok: false, error: 'Calling would commit your entire stack \u2014 use All-In instead.' };
+      return { ok: false, error: 'Calling would commit your entire stack \u2014 use All In instead.' };
     }
 
     player.chips -= owed;
@@ -4682,7 +4771,7 @@ class GameTable {
     const player = guard.player;
 
     if (player.chips <= 0) {
-      return { ok: false, error: 'You have no chips left to go all-in with.' };
+      return { ok: false, error: 'You have no chips left to go All In with.' };
     }
 
     const ownStackCap = player.currentBet + player.chips;
@@ -4727,7 +4816,7 @@ class GameTable {
     // NEW 12.6 (Part C.2): logs the amount actually committed (amount,
     // capped per the legal-max logic above -- not necessarily the
     // player's full remaining stack).
-    this.streetActionLog.push({ playerName: player.name, text: `is all-in for $${amount}` });
+    this.streetActionLog.push({ playerName: player.name, text: `is All In for $${amount}` });
     this._queueAnnouncement(`${player.name} is ALL IN for $${amount}!`, 'allin'); // NEW 9.0 (§6.11): dramatic table-wide notice
     this.currentTurnPlayerId = this._nextTurnPlayerId();
     this._maybeCloseBettingRound();
@@ -5526,6 +5615,7 @@ class GameTable {
       // NEW 13.0 (spec B.1 Standing Convention): every new gate, computed
       // here, read directly by the client.
       showAllAvailable: this._showAllAvailable(),
+      gameChoiceSeq: this.gameChoiceSeq, // NEW 13.1 (Part D.1)
       drawRoundNumber: this.drawRoundNumber,
       drawRoundOpen: this.drawRoundOpen,
       drawTurnPlayerId: this.drawTurnPlayerId,

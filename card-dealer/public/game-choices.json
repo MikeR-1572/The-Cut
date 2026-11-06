@@ -517,8 +517,8 @@
       "raiseCap": 3,
       "initialDeal": "2-down-1-reveal",
       "drawCardsDealt": "down",
-      "overUnder": "over-busts",
-      "naturalsWin": "yes",
+      "freezeAfter": 3,
+      "overUnder": "nearest",
       "foldedHands": "leave",
       "audible": ""
     }
@@ -545,8 +545,8 @@
       "raiseCap": 3,
       "initialDeal": "3-down-1-reveal",
       "drawCardsDealt": "down",
-      "overUnder": "over-busts",
-      "naturalsWin": "yes",
+      "freezeAfter": 3,
+      "overUnder": "nearest",
       "foldedHands": "leave",
       "audible": ""
     }

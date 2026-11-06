@@ -31,7 +31,7 @@ test('No-Limit: a Bet/Raise that would commit the entire stack is rejected -- mu
   const room = holdemRoomAtPreFlopBettingWithOptions({ smallBlind: 5, bigBlind: 10 }, 100, 1000, 1000);
   const result = room.placeBet('p1', 100); // p1's entire stack
   assert.strictEqual(result.ok, false);
-  assert.match(result.error, /All-In/);
+  assert.match(result.error, /All In/); // CHANGED 13.1 (A.4)
 });
 
 test('No-Limit: Call that would commit the entire remaining stack is rejected -- must use All-In instead', () => {
@@ -41,7 +41,7 @@ test('No-Limit: Call that would commit the entire remaining stack is rejected --
   // p3 (BB, already $10 in, $15 chips left) owes $190 to call -- more than they have.
   const result = room.call('p3');
   assert.strictEqual(result.ok, false);
-  assert.match(result.error, /All-In/);
+  assert.match(result.error, /All In/); // CHANGED 13.1 (A.4)
   assert.strictEqual(room.allIn('p3').ok, true);
 });
 

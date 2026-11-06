@@ -462,7 +462,7 @@
       <h3>Go All In?</h3>
       <p class="dialog-hint" id="all-in-dialog-text"></p>
       <div class="dialog-actions">
-        <button type="button" class="btn btn-secondary" id="btn-all-in-cancel" title="Don't go all-in">Cancel</button>
+        <button type="button" class="btn btn-secondary" id="btn-all-in-cancel" title="Don't go All In">Cancel</button>
         <button type="button" class="btn btn-allin" id="btn-all-in-confirm" title="Commit your entire stack -- cannot be undone">All In</button>
       </div>
     </dialog>
@@ -657,7 +657,12 @@
            -confirm all kept exactly as before, so no client.js changes
            were needed for this Part. -->
       <div class="options-dialog-actions">
-        <button type="button" class="btn btn-secondary btn-small" id="btn-options-rules" title="View this game's rules">Game Rules</button>
+        <div class="options-dialog-actions-left">
+          <button type="button" class="btn btn-secondary btn-small" id="btn-options-rules" title="View this game's rules">Game Rules</button>
+          <!-- NEW 13.1 (the-cut-spec_v13-1.md Part F): editable state only
+               (Dealer, idle), same rule as Cancel. -->
+          <button type="button" class="btn btn-secondary btn-small" id="btn-options-restore" title="Put every option back to this game's defaults" hidden>Restore Defaults</button>
+        </div>
         <div class="options-dialog-actions-right">
           <!-- NEW 10.4 (the-cut-spec_v10-4.md Part C): lets the Dealer back
                out to game selection after opening Options -- previously the

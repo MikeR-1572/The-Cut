@@ -87,6 +87,13 @@ const ACTION_METHODS = {
   killHandCancelConfirm: 0,
   // NEW 9.0
   allIn: 0,
+  // NEW 13.0
+  pickCard: 0,
+  revealComplete: 0,
+  openDrawingRound: 0,
+  drawCard: 0,
+  passDraw: 0,
+  showAll: 0,
 };
 
 /**

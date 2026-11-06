@@ -862,6 +862,29 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   flex-shrink: 0;
 }
 .seat-show-cards:hover { background: rgba(201, 163, 92, 0.15); }
+/* NEW 13.0 (spec D.4): Frozen -- a cool blue so it reads differently
+   from Folded (grey) and Out of Hand (rose); the player is still in the hand. */
+.seat-frozen-badge {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #b9d3e6;
+  background: rgba(110, 160, 200, 0.16);
+  border: 1px solid rgba(110, 160, 200, 0.45);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+/* NEW 13.0 (spec D.3): "Revealed ✓" during the Initial Reveal -- only that the player is done. */
+.seat-reveal-done-badge {
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  color: var(--brass-bright);
+  border: 1px solid rgba(201, 163, 92, 0.5);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
 .seat-revealed-badge {
   font-size: 0.58rem;
   text-transform: uppercase;
@@ -1631,7 +1654,10 @@ select option {
 .personal-fold-action,
 .personal-ante-action,
 .personal-discard-action,
-.personal-declare-action {
+.personal-declare-action,
+.personal-pick-action,
+.personal-reveal-action,
+.personal-draw-action {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1639,6 +1665,7 @@ select option {
 }
 .personal-action-label { font-size: 0.8rem; color: var(--ivory-dim); }
 #bet-amount { width: 100px; }
+#pick-position { width: 80px; } /* NEW 13.0 (spec C.2) */
 
 @media (max-width: 560px) {
   .betting-rail-personal { flex-direction: column; align-items: stretch; }
@@ -1646,8 +1673,12 @@ select option {
   .personal-fold-action,
   .personal-ante-action,
   .personal-discard-action,
-  .personal-declare-action { flex-direction: column; align-items: stretch; }
+  .personal-declare-action,
+  .personal-pick-action,
+  .personal-reveal-action,
+  .personal-draw-action { flex-direction: column; align-items: stretch; }
   #bet-amount { width: 100%; }
+  #pick-position { width: 100%; }
 }
 
 /* ---------- Buy Chips / Sit Out / Claim Pot dialogs ---------- */

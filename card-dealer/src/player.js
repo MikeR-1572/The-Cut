@@ -65,6 +65,12 @@ function createPlayer(id, name, isFirst) {
     declaration: null, // NEW 8.1 (§5.11) -- "high" | "low" | "both" | null, declareHighLowBoth presets only. Pure stored label, never evaluated server-side. Resets to null at every RequestAntes entry, same as discardPhaseActed/standingPat.
     allIn: false, // NEW 9.0 (§6.11), CLARIFIED 9.1 -- true once this player has used the All-In action this hand. Drives the "All-In" seat badge -- a DISPLAY-only concept as of 9.1. Clears back to false the instant a refund (§6.10) restores any stack to this player. Does NOT govern turn-order eligibility on its own as of 9.1 -- see bettingCapped below. Resets to false at every RequestAntes entry.
     bettingCapped: false, // NEW 9.1 (§6.10) -- true the instant this player is ever the recipient of an uncalled-bet refund, for ANY reason, whether or not they were ever marked allIn. Once true, stays true for the REST OF THE HAND. Excludes the player from all future turn-order, independent of allIn's own value -- the functional concept; allIn is purely cosmetic as of 9.1. Resets to false at every RequestAntes entry.
+    // NEW 13.0 (the-cut-spec_v13-0.md D.3/D.4): vying-profile per-hand
+    // state. All reset at every RequestAntes entry (_performFullReset).
+    consecutivePasses: 0, // Drawing Rail: Draw resets to 0, Pass adds 1; betting rounds never touch it
+    frozen: false, // true once consecutivePasses reaches 2 -- skipped by the Drawing Rail for the rest of the hand
+    revealDone: false, // Initial Reveal: clicked Reveal Complete (public -- "Revealed ✓")
+    revealSelection: null, // Initial Reveal: the card ids chosen -- PRIVATE, never sent in toRedactedState
     totalContributedThisHand: 0, // NEW 9.0 (§6.10) -- running total of everything this player has put into the pot this hand (antes/blinds/bets/calls/raises/all-ins). Resets to 0 at every RequestAntes entry.
   };
 }

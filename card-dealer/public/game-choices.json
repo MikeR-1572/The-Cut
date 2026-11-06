@@ -3,6 +3,7 @@
     "id": "draw-5card",
     "displayName": "5-Card Draw",
     "profile": "draw",
+    "menuGroup": "draw",
     "reAnteable": false,
     "advanceTurnRequired": false,
     "burnAvailable": false,
@@ -27,6 +28,7 @@
     "id": "draw-5card-jacks",
     "displayName": "Jacks or Better",
     "profile": "draw",
+    "menuGroup": "draw",
     "reAnteable": true,
     "advanceTurnRequired": false,
     "burnAvailable": false,
@@ -51,6 +53,7 @@
     "id": "draw-5card-jacks-trips",
     "displayName": "Jacks or Better, Trips to Win",
     "profile": "draw",
+    "menuGroup": "draw",
     "reAnteable": true,
     "advanceTurnRequired": false,
     "burnAvailable": false,
@@ -75,6 +78,7 @@
     "id": "stud-5card",
     "displayName": "5-Card Stud",
     "profile": "stud",
+    "menuGroup": "stud",
     "description": "5-Card Stud - 1 Card Down, 4 Up",
     "rules": "5-Card Stud\n\n5 cards dealt per player: 1 down + 4 up.\n\n2 cards dealt in first betting round (called 2nd Street). Player with the low card starts the betting with a forced-bet called the Bring-In.\n\n1 card dealt for each of the next 3 betting rounds (3rd, 4th & 5th Streets). Player with the highest showing cards begins the betting in these rounds.",
     "hiddenOptions": {
@@ -104,6 +108,7 @@
     "id": "stud-7card",
     "displayName": "7-Card Stud",
     "profile": "stud",
+    "menuGroup": "stud",
     "description": "7-Card Stud - 2 Cards Down, 4 Up, 1 Down",
     "rules": "7-Card Stud\n\n7 cards dealt per player: 2 down + 4 up + 1 down.\n\n3 cards dealt in first betting round (called 3rd Street). Player with the low card starts the betting with a forced-bet called the Bring-In.\n\n1 card dealt for each of the next 4 betting rounds (4th, 5th, 6th & 7th Streets). Player with the highest showing cards begins the betting in these rounds.",
     "hiddenOptions": {
@@ -135,6 +140,7 @@
     "id": "stud-7card-razz",
     "displayName": "Razz (Low Hand Wins)",
     "profile": "stud",
+    "menuGroup": "stud-variants",
     "description": "(7CS) Razz - Low Hand Wins!",
     "rules": "7-Card Stud Lowball (Variant)\n\nLOWEST HAND WINS!\n\nRules for Low Hand is a Dealer Option.\n\nOn 3rd Street, highest card makes the Bring-In bet.\n\nOn 4th – 7th Street, lowest cards showing opens the betting.\n\nSuit Ranking: Clubs < Diamonds < Hearts < Spades",
     "hiddenOptions": {
@@ -167,6 +173,7 @@
     "id": "stud-7card-stud8",
     "displayName": "Stud 8 (Split Pot)",
     "profile": "stud",
+    "menuGroup": "stud-variants",
     "description": "(7CS) Stud/8 - Hi/Lo Hands Split the Pot",
     "rules": "7-Card Stud Split Pot (Variant)\n\nHigh hand and Lowest QUALIFIED hand split the pot.\n\nLow Hand Qualifications:\n* Ace-To-Five ranking\n* No Pairs\n* No card higher than an 8\n* Straights and flushes are not counted against the player\n\nIf there is no qualified low hand, then high hand takes the whole pot.\n\nYou may use different cards to play for both the High and Low hand.",
     "hiddenOptions": {
@@ -199,6 +206,7 @@
     "id": "stud-7card-follow-queen",
     "displayName": "Follow the Queen",
     "profile": "stud",
+    "menuGroup": "stud-variants",
     "description": "(7CS) Follow the Queen - Next Card after a Queen is Wild",
     "rules": "7-Card Stud with Wildcards (Variant)\n\nIf and when a Queen is dealt face up, the next card dealt face up is wild. If another Queen is dealt face up, the next card dealt face up replaces the previous wildcard.\n\nIf the final card dealt face up is a Queen, then there are no wild cards.",
     "hiddenOptions": {
@@ -230,6 +238,7 @@
     "id": "stud-7card-baseball",
     "displayName": "Baseball",
     "profile": "stud",
+    "menuGroup": "stud-variants",
     "description": "(7CS) Baseball - 9s Wild, 3s Sometimes Wild, 4s Can Buy Another Card",
     "rules": "7-Card Stud Wildcards (Variant)\n\nBasics:\n* 9s are always wild\n* 3s are sometimes wild\n* Players dealt a 4 face up may buy another card\n\nDealer Options To Watch For:\n* Do 3s dealt face up require payment?\n* Are all 3s wild or only face up or face down?\n* Do 4s require payment to get an extra card",
     "hiddenOptions": {
@@ -266,6 +275,7 @@
     "id": "stud-7card-baseball-hilo",
     "displayName": "Baseball (HI/LO)",
     "profile": "stud",
+    "menuGroup": "stud-variants",
     "description": "(7CS) Baseball - Hi/Lo Hands Split the Pot",
     "rules": "7-Card Stud Wildcards (Variant)\n\nHigh / Low hands split the Pot.\n\nBasics:\n* 9s are always wild\n* 3s are sometimes wild\n* Players dealt a 4 face up may buy another card\n\nDealer Options To Watch For:\n* Do 3s dealt face up require payment?\n* Are all 3s wild or only face up or face down?\n* Do 4s require payment to get an extra card\n* What are the Low Hand Rules",
     "hiddenOptions": {
@@ -308,6 +318,7 @@
     "id": "stud-7card-black-mariah",
     "displayName": "Black Mariah",
     "profile": "stud",
+    "menuGroup": "stud-variants",
     "reAnteable": true,
     "hasKillCard": true,
     "killCard": "Qs",
@@ -342,6 +353,7 @@
     "id": "stud-7card-high-chicago",
     "displayName": "High Chicago (Split Pot)",
     "profile": "stud",
+    "menuGroup": "stud-variants",
     "description": "(7CS) High Chicago - Hi Hand & High Spade Down Split the Pot",
     "rules": "7-Card Stud Split Pot (Variant)\n\nPot is Split Between:\n* Highest hand and\n* Highest FACE DOWN spade\n* Ace is highest card for spade down\n\nPrior to showing hand, players must declare whether they are playing for the High hand, Highest Spade, or Both. If a player declares for \"Both\", he must win both in order to win anything.\n\nIf no spade is down, player winning the High hand wins the entire pot.\n\nAny portion of pot not allocated carries over to the next game.",
     "hiddenOptions": {
@@ -378,6 +390,7 @@
     "id": "stud-7card-low-chicago",
     "displayName": "Low Chicago (Split Pot)",
     "profile": "stud",
+    "menuGroup": "stud-variants",
     "description": "(7CS) Low Chicago - Hi Hand & Low Spade Down Split the Pot",
     "rules": "7-Card Stud Split Pot (Variant)\n\nPot is Split Between:\n* Highest hand and\n* Lowest FACE DOWN spade\n* Deuce is the lowest card\n\nPrior to showing hand, players must declare whether they are playing for the High hand, Lowest Spade, or Both. If a player declares for \"Both\", he must win both in order to win anything.\n\nIf no spade is down, player winning the High hand wins the entire pot.\n\nAny portion of pot not allocated carries over to the next game.",
     "hiddenOptions": {
@@ -414,6 +427,7 @@
     "id": "holdem-texas",
     "displayName": "Texas Hold'em",
     "profile": "holdem",
+    "menuGroup": "holdem",
     "description": "Texas Hold'em",
     "rules": "Texas Hold'em\n\nOpening Deal\nEach player is dealt 2 cards face down.\n\nThe Flop\n3 Community Cards are dealt to the center of the table.\n\nThe Turn\n1 additional Community Card is added to the 3 already there.\n\nThe River\n1 last Community Card is added, making 5 Community Cards.\n\nA round of betting takes place after each of the 4 deals. After the River betting round, players make their best 5 card hand from their 2 down cards & the 5 community cards.",
     "hiddenOptions": {
@@ -437,6 +451,7 @@
     "id": "holdem-omaha",
     "displayName": "Omaha",
     "profile": "holdem",
+    "menuGroup": "holdem",
     "description": "Omaha - 4 Hole Cards, Must Use 2 Hole + 3 Community Cards",
     "rules": "Texas Hold'em (Variant)\n\nSame as Texas Hold'em with the following changes:\n* 4 cards are dealt to each player in the opening deal\n* To make their best hand, players must use exactly 2 of their down cards and 3 of the community cards",
     "hiddenOptions": {
@@ -460,6 +475,7 @@
     "id": "holdem-omaha-8",
     "displayName": "Omaha 8 or Better",
     "profile": "holdem",
+    "menuGroup": "holdem",
     "description": "Omaha/8 - Hi & Lo Hands Split the Pot",
     "rules": "Omaha Split Pot (Variant)\n\nHigh hand and Lowest QUALIFIED hand split the pot.\n\nLow Hand Qualifications (Stud 8 rules):\n* Ace-To-Five ranking\n* No Pairs\n* No card higher than an 8\n* Straights and flushes are not counted against the player\n\nIf there is no qualified low hand, then high hand takes the whole pot.\n\nYou may use different cards to play for both the High and Low hand.",
     "hiddenOptions": {
@@ -477,6 +493,78 @@
       "audible": "",
       "bettingStructure": "no-limit",
       "raiseCap": "no-cap"
+    }
+  },
+  {
+    "id": "home-7-27",
+    "displayName": "7-27",
+    "profile": "vying",
+    "menuGroup": "home-favorites",
+    "description": "7-27 - Draw cards to 7 or 27",
+    "rules": "Each player is dealt 2 cards face down, per the Initial Deal option. If the Initial Deal includes a reveal, every player chooses a card to turn face up, and all chosen cards are turned up together. A betting round follows.\n\nCard values: 2 through 10 count at face value. Face cards count ½. Aces count 1 or 11.\n\nThe goal is a hand totaling 7 (Low) or 27 (High).\n\nIn each drawing round, each player in turn may Draw 1 Card or Pass. A player who passes twice in a row is frozen and takes no more cards this hand. Each drawing round where at least one player draws is followed by a betting round. When nobody draws, players declare High, Low or Both.\n\nNaturals: A-A-5.\n\nSee the game's Options for how Over/Under and Naturals are being played.",
+    "hiddenOptions": {
+      "anteType": "flat",
+      "bettingStructure": "fixed-limit",
+      "declareHighLowBoth": true,
+      "declareOptions": {
+        "a": "High",
+        "b": "Low"
+      }
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "fixedBet": 1,
+      "raiseCap": 3,
+      "initialDeal": "2-down-1-reveal",
+      "drawCardsDealt": "down",
+      "overUnder": "over-busts",
+      "naturalsWin": "yes",
+      "foldedHands": "leave",
+      "audible": ""
+    }
+  },
+  {
+    "id": "home-15-35",
+    "displayName": "15-35",
+    "profile": "vying",
+    "menuGroup": "home-favorites",
+    "description": "15-35 - Draw cards to 15 or 35",
+    "rules": "Each player is dealt 3 cards face down, per the Initial Deal option. If the Initial Deal includes a reveal, every player chooses a card to turn face up, and all chosen cards are turned up together. A betting round follows.\n\nCard values: 2 through 10 count at face value. Face cards count ½ or 10. Aces count 1 or 11.\n\nThe goal is a hand totaling 15 (Low) or 35 (High).\n\nIn each drawing round, each player in turn may Draw 1 Card or Pass. A player who passes twice in a row is frozen and takes no more cards this hand. Each drawing round where at least one player draws is followed by a betting round. When nobody draws, players declare High, Low or Both.\n\nNaturals: A-A-A-2, A-A-3-10, A-A-4-9, A-A-5-8, A-A-6-7.\n\nSee the game's Options for how Over/Under and Naturals are being played.",
+    "hiddenOptions": {
+      "anteType": "flat",
+      "bettingStructure": "fixed-limit",
+      "declareHighLowBoth": true,
+      "declareOptions": {
+        "a": "High",
+        "b": "Low"
+      }
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "fixedBet": 1,
+      "raiseCap": 3,
+      "initialDeal": "3-down-1-reveal",
+      "drawCardsDealt": "down",
+      "overUnder": "over-busts",
+      "naturalsWin": "yes",
+      "foldedHands": "leave",
+      "audible": ""
+    }
+  },
+  {
+    "id": "home-pick-a-card",
+    "displayName": "Pick-a-Card",
+    "profile": "pickcard",
+    "menuGroup": "home-favorites",
+    "description": "Pick-a-Card - Draw a card from the deck. High card wins!",
+    "rules": "There is no deal. After antes, each player in turn picks a position in the deck (1 is the top card) and receives the card at that position.\n\nThe Reveal option sets whether each card is turned face up when drawn, or all cards are turned up together once the last player has drawn.\n\nHigh card wins. There is no betting.",
+    "hiddenOptions": {
+      "anteType": "flat"
+    },
+    "dealerOptions": {
+      "anteAmount": 0,
+      "reveal": "when-drawn",
+      "audible": ""
     }
   }
 ]

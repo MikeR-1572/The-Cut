@@ -236,6 +236,12 @@
         <div class="rail-group" id="rabbit-hunt-group" hidden>
           <button class="btn btn-primary" id="btn-rabbit-hunt" type="button" title="Reveal one more card from the deck -- purely for curiosity, no effect on the hand">Rabbit Hunt</button>
         </div>
+        <!-- NEW 13.0 (the-cut-spec_v13-0.md B.3): Folded Hands = Left on
+             Table only, after the claim is approved, once per hand.
+             Visibility is the server's showAllAvailable, never re-derived. -->
+        <div class="rail-group" id="show-all-group" hidden>
+          <button class="btn btn-primary" id="btn-show-all" type="button" title="Turn every face-down card on the table face up -- no effect on the pot or the result">Show All</button>
+        </div>
 
         <div class="rail-divider" id="deal-section-divider" hidden></div>
         <div class="rail-group" id="deal-group">
@@ -304,6 +310,11 @@
 
         <div class="rail-group" id="open-betting-group">
           <button class="btn btn-secondary" id="btn-open-betting" type="button" title="Open a new betting round">Open Betting Round</button>
+        </div>
+
+        <!-- NEW 13.0 (spec D.2/D.4): 7-27 / 15-35 drawing rounds. -->
+        <div class="rail-group" id="open-drawing-group" hidden>
+          <button class="btn btn-secondary" id="btn-open-drawing" type="button" title="Start the drawing round -- each player in turn may Draw 1 Card or Pass">Open Drawing Round</button>
         </div>
 
         <div class="rail-divider" id="game-section-divider" hidden></div>
@@ -381,6 +392,25 @@
              Button text is entirely dynamic as of 8.2 (declareOptions.a/b,
              §3) -- 8.1's hardcoded "High"/"Low" was wrong for Chicago,
              which splits High Hand vs. a spade, never High vs. Low. -->
+        <!-- NEW 13.0 (spec C.2): the Pick-a-Card Drawing Rail -- shown
+             only to the player whose turn it is. The valid range comes
+             from the server (pickRange). -->
+        <div class="personal-pick-action" id="personal-pick-action" hidden>
+          <span class="personal-action-label" id="personal-pick-label">Pick a card:</span>
+          <input type="number" id="pick-position" class="mono-input" min="1" placeholder="#" title="Card position, counting down from the top of the deck" />
+          <button class="btn btn-primary" id="btn-pick-card" type="button" title="Draw the card at that position">Draw</button>
+        </div>
+        <!-- NEW 13.0 (spec D.3): the Reveal Rail. -->
+        <div class="personal-reveal-action" id="personal-reveal-action" hidden>
+          <span class="personal-action-label" id="personal-reveal-label">Click a card to select it, then:</span>
+          <button class="btn btn-primary" id="btn-reveal-complete" type="button" disabled title="Turn your selected card face up once everyone is done">Reveal Complete</button>
+        </div>
+        <!-- NEW 13.0 (spec D.4): the Drawing Rail -- shown only to the
+             player whose turn it is. -->
+        <div class="personal-draw-action" id="personal-draw-action" hidden>
+          <button class="btn btn-primary" id="btn-draw-card" type="button" title="Take the top card of the deck">Draw 1 Card</button>
+          <button class="btn btn-secondary" id="btn-pass-draw" type="button" title="Take no card this round">Pass</button>
+        </div>
         <div class="personal-declare-action" id="personal-declare-action" hidden>
           <span class="personal-action-label">Declare for the pot:</span>
           <button class="btn btn-secondary" id="btn-declare-a" type="button">A</button>

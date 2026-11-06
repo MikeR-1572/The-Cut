@@ -353,6 +353,19 @@ wss.on('connection', (ws, req) => {
         return handleAllIn(ws);
       case 'declare':
         return handleDeclare(ws, payload);
+      // NEW 13.0 (the-cut-spec_v13-0.md Parts B-D)
+      case 'pickCard':
+        return handleNewGameAction(ws, (t, id) => t.pickCard(id, payload?.position));
+      case 'revealComplete':
+        return handleNewGameAction(ws, (t, id) => t.revealComplete(id, payload?.cardIds));
+      case 'openDrawingRound':
+        return handleNewGameAction(ws, (t, id) => t.openDrawingRound(id));
+      case 'drawCard':
+        return handleNewGameAction(ws, (t, id) => t.drawCard(id));
+      case 'passDraw':
+        return handleNewGameAction(ws, (t, id) => t.passDraw(id));
+      case 'showAll':
+        return handleNewGameAction(ws, (t, id) => t.showAll(id));
       case 'payDealInterrupt':
         return handlePayDealInterrupt(ws);
       case 'buyDealInterrupt':
@@ -823,6 +836,17 @@ function handleDeclare(ws, { value }) {
   const gameTable = gameTableForSocket(ws);
   if (!gameTable) return;
   const result = gameTable.declare(ws.meta.playerId, value);
+  if (!result.ok) return send(ws, 'dealError', { message: result.error });
+  broadcastGameTableState(gameTable);
+}
+
+// NEW 13.0: the six new game actions share one handler shape -- the
+// same validate / error-to-sender / broadcast-on-success pattern every
+// other action handler above uses (e.g. handleDeclare()).
+function handleNewGameAction(ws, invoke) {
+  const gameTable = gameTableForSocket(ws);
+  if (!gameTable) return;
+  const result = invoke(gameTable, ws.meta.playerId);
   if (!result.ok) return send(ws, 'dealError', { message: result.error });
   broadcastGameTableState(gameTable);
 }

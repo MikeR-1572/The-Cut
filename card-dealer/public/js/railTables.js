@@ -238,6 +238,41 @@
         return { newHand: newHandView }; // covers mid-round (bettingOpen === true) phases within the Kill Hand window too
       },
     },
+
+    /**
+     * NEW 13.0 (the-cut-spec_v13-0.md C.2): Pick-a-Card. No Deal, no
+     * betting -- the Dealer's Rail shows nothing during a hand. Pass the
+     * Buck (PreGame/CycleComplete) is generic, handled in client.js.
+     */
+    pickcard: {
+      phaseView() {
+        return {};
+      },
+    },
+
+    /**
+     * NEW 13.0 (spec D.2): 7-27 / 15-35. Deal shows during RequestAntes
+     * (inactive) and OpeningDeal; its count is the server's
+     * `initialDealCount` (2 or 3, from Initial Deal) -- never re-derived
+     * from the option here. The Initial Reveal and Declaration start
+     * automatically (nothing for the Dealer to click). Open Drawing
+     * Round shows during DrawRound until the Dealer opens it.
+     */
+    vying: {
+      phaseView(gameTable) {
+        const phase = gameTable.handPhase;
+        const count = gameTable.initialDealCount;
+        if (phase === 'RequestAntes') {
+          return { deal: { visible: true, active: false, count, title: 'Waiting for every active player to pay their ante' } };
+        }
+        if (phase === 'OpeningDeal') {
+          return { deal: { visible: true, active: true, count, title: 'Deal the opening cards, face down, to every active player' } };
+        }
+        if (phase === 'InitialBetting' || phase === 'DrawBetting') return { openBetting: { visible: !gameTable.bettingOpen } };
+        if (phase === 'DrawRound') return { openDrawing: { visible: !gameTable.drawRoundOpen } };
+        return {}; // PreGame, InitialReveal, Declare, Showdown, CycleComplete
+      },
+    },
   };
 
   window.RAIL_TABLES = RAIL_TABLES;

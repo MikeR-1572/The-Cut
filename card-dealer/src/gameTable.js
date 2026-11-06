@@ -10,6 +10,20 @@ const MAX_PLAYERS = 8;
 const MIN_PLAYERS_TO_DEAL = 2;
 const MAX_TABLE_NAME_LENGTH = 40;
 
+/**
+ * NEW 13.0 (spec Parts C.1/D.1): the stored values each new choice
+ * option accepts. setGameOption() rejects anything else. The client's
+ * own ENUM_OPTION_VALUES (labels) must list the same stored values.
+ */
+const ENUM_OPTION_VALUES_13_0 = {
+  reveal: ['when-drawn', 'at-showdown'],
+  initialDeal: ['2-down-0-reveal', '2-down-1-reveal', '3-down-1-reveal'],
+  drawCardsDealt: ['down', 'up'],
+  overUnder: ['over-busts', 'under-trumps', 'nearest'],
+  naturalsWin: ['yes', 'no'],
+  foldedHands: ['muck', 'leave'],
+};
+
 // Beta-window escape hatch, added for 11.4 (the-cut-spec_v11-4.md
 // Part D.3). Mike specifically wanted an easy, single-point revert
 // available while validating this against his own test scenarios,
@@ -221,6 +235,23 @@ class GameTable {
     // safe because a legal raise increment is always >= the previous
     // minimum, so simply overwriting is equivalent to taking the max.
     this._minRaiseIncrement = 0;
+
+    // NEW 13.0 (the-cut-spec_v13-0.md Parts B-D): per-hand state for the
+    // two new phase-machine profiles. Every field below is reset in
+    // _performFullReset(), the same single place every other per-hand
+    // field is.
+    //   vying (7-27 / 15-35): the Drawing Rail.
+    this.drawRoundNumber = 0; // 1st, 2nd, 3rd Draw... -- incremented on every DrawRound entry
+    this.drawRoundOpen = false; // Dealer clicked Open Drawing Round; the rail is live
+    this.drawTurnPlayerId = null; // whose turn it is on the Drawing Rail
+    this._drawQueue = []; // remaining seats to visit this drawing round, clockwise
+    this._drawRoundAnyDrew = false; // did anyone Draw (not Pass) this round -- decides DrawBetting vs Declare
+    //   pickcard (Pick-a-Card): the Pick-a-Card Drawing Rail.
+    this._pickRoster = null; // Set of player ids drawing this hand (stands in for "dealt in" -- there is no deal)
+    this._pickQueue = [];
+    this.pickTurnPlayerId = null;
+    //   shared: Show All (B.3), once per hand.
+    this.showAllUsed = false;
 
     // NEW 10.3 (the-cut-spec_v10-3.md Part A §2): the most recent
     // pre-current-hand bank snapshot (chips/totalBuyIn per player id),
@@ -594,6 +625,7 @@ class GameTable {
     this._resolveAbsentPlayerTurn(player);
     player.sittingOut = true;
     player.sitOutPending = false;
+    this._reconcilePlayerInputPhases(); // NEW 13.0 (B.1): Pick-a-Card skips them; Reveal/Declare stop waiting on them
 
     return { ok: true, wasDealer, newDealerId };
   }
@@ -606,6 +638,7 @@ class GameTable {
    */
   _applyFoldBookkeeping(player) {
     player.folded = true;
+    this._applyFoldedHandsRule(player); // NEW 13.0 (B.3)
     this._actedSinceRaise.add(player.id);
     if (this.bettingOpen) {
       if (this.currentTurnPlayerId === player.id) {
@@ -615,6 +648,7 @@ class GameTable {
     } else {
       this._maybeAdvanceFromDiscardPhase();
       this._maybeAdvanceFromDeclare();
+      this._reconcilePlayerInputPhases(); // NEW 13.0 (B.1)
     }
   }
 
@@ -653,6 +687,14 @@ class GameTable {
    * without touching `folded` at all -- their hand stays completely live.
    */
   _resolveAbsentPlayerTurn(player) {
+    // NEW 13.0 (spec B.1): a player whose grace expires while holding
+    // the Drawing Rail is treated as having clicked Pass (which counts
+    // toward frozen). Checked before the _canAct() guard below, since an
+    // all-in player is still eligible to draw and can hold the rail.
+    if (this.profile === 'vying' && this.handPhase === 'DrawRound' && this.drawRoundOpen && this.drawTurnPlayerId === player.id) {
+      this._applyDrawPass(player);
+      return;
+    }
     if (!this._canAct(player)) return; // no live decision to resolve at all
     if (this._isFacingABet(player)) {
       this._applyFoldBookkeeping(player);
@@ -853,6 +895,7 @@ class GameTable {
       }
       this._reassignDealerToNextEligible(player);
     }
+    this._reconcilePlayerInputPhases(); // NEW 13.0 (B.1)
   }
 
   /**
@@ -993,6 +1036,10 @@ class GameTable {
    */
   _wasDealtIn(player) {
     if (!isPhaseGated(this.profile)) return true;
+    // NEW 13.0 (spec Part C): Pick-a-Card has no deal -- nobody holds a
+    // card until their own turn on the rail, so "dealt in" means "on this
+    // hand's pick roster" instead (set when PickDraw begins).
+    if (this.profile === 'pickcard' && this._pickRoster && this._pickRoster.has(player.id)) return true;
     return player.hand.length > 0;
   }
 
@@ -1178,7 +1225,363 @@ class GameTable {
         const departingIds = this.players.filter((p) => p.pendingDeparture).map((p) => p.id);
         for (const id of departingIds) this.removePlayer(id);
       }
+      this._onEnterPhase(phase);
     }
+  }
+
+  /**
+   * NEW 13.0 (the-cut-spec_v13-0.md Parts C/D): phase-entry side effects
+   * for the two new profiles, run from the single place handPhase is
+   * ever assigned (_setHandPhase) so no caller can enter one of these
+   * phases without them. Explicit no-op for draw/holdem/stud (audit,
+   * B.1): none of their phases have entry side effects here.
+   */
+  _onEnterPhase(phase) {
+    const isPickcard = this.profile === 'pickcard';
+    const isVying = this.profile === 'vying';
+    if (!isPickcard && !isVying) return;
+    if (isPickcard && phase === 'PickDraw') {
+      this._beginPickDraw();
+      return;
+    }
+    if (isVying && phase === 'DrawRound') {
+      this.drawRoundNumber += 1;
+      this.drawRoundOpen = false;
+      this.drawTurnPlayerId = null;
+      this._drawQueue = [];
+      this._drawRoundAnyDrew = false;
+      return;
+    }
+    if (phase === 'Showdown') {
+      // C.2 (Pick-a-Card, spec'd) and D (vying, the same no-hang rule):
+      // a $0 pot has nothing to claim -- the claim window can never open
+      // (_claimWindowOpen() requires a positive pot), so without this
+      // the hand would sit at Showdown with no legal action. Straight to
+      // CycleComplete instead.
+      const multiPot = Array.isArray(this.pots) && this.pots.length > 0;
+      if (!multiPot && this.pot <= 0) this._completeCycleWithoutClaim();
+    }
+  }
+
+  /**
+   * NEW 13.0: the end-of-hand cleanup resolveClaim() performs once every
+   * pot is claimed (its own `allPotsResolved` block), for the one case
+   * with no claim at all: a $0 pot at Showdown (see _onEnterPhase()).
+   * Kept field-for-field identical to that block so the two exits from a
+   * hand can't drift apart.
+   */
+  _completeCycleWithoutClaim() {
+    this.bettingOpen = false;
+    this.currentBetToCall = 0;
+    for (const player of this.players) {
+      player.currentBet = 0;
+      player.folded = false;
+      player.allIn = false;
+      player.bettingCapped = false;
+      player.totalContributedThisHand = 0;
+    }
+    this.pots = null;
+    this.idle = true;
+    this.rabbitHuntAvailable = false;
+    this._applyPendingSitOuts();
+    this._applyPendingSitIns();
+    this._setHandPhase('CycleComplete');
+  }
+
+  // ---------------------------------------------------------------
+  // NEW 13.0: Pick-a-Card (the-cut-spec_v13-0.md Part C)
+  // ---------------------------------------------------------------
+
+  /** Seats clockwise starting at the position anchor's left, as player ids. */
+  _seatsClockwiseFromAnchorLeft() {
+    const n = this.turnOrder.length;
+    if (n === 0) return [];
+    const anchorIdx = this.turnOrder.indexOf(this._positionAnchorId());
+    const start = anchorIdx === -1 ? 0 : (anchorIdx + 1) % n;
+    const ids = [];
+    for (let i = 0; i < n; i++) ids.push(this.turnOrder[(start + i) % n]);
+    return ids;
+  }
+
+  /**
+   * PickDraw entry: everyone dealable under the existing rules
+   * (_dealableActivePlayers()) draws -- no opt-in, no Dealer choice
+   * (decided with Mike). The roster stands in for "dealt in" (see
+   * _wasDealtIn()), since nobody holds a card until they draw.
+   */
+  _beginPickDraw() {
+    const dealable = new Set(this._dealableActivePlayers().map((p) => p.id));
+    const order = this._seatsClockwiseFromAnchorLeft().filter((id) => dealable.has(id));
+    this._pickRoster = new Set(order);
+    this._pickQueue = order.slice();
+    this.pickTurnPlayerId = null;
+    this._advancePickTurn();
+  }
+
+  /** Hands the rail to the next roster member still in the hand; finishes PickDraw when nobody is left. */
+  _advancePickTurn() {
+    while (this._pickQueue.length > 0) {
+      const id = this._pickQueue.shift();
+      const player = this.getPlayer(id);
+      if (player && this._isHandParticipant(player)) {
+        this.pickTurnPlayerId = id;
+        return;
+      }
+      // B.1 "leaving the hand mid-phase": a roster member who sat out,
+      // left, or timed out is skipped and draws no card.
+    }
+    this.pickTurnPlayerId = null;
+    this._finishPickDraw();
+  }
+
+  _finishPickDraw() {
+    if (this.handPhase !== 'PickDraw') return;
+    if (this.gameOptions?.reveal === 'at-showdown') {
+      for (const player of this.players) {
+        if (!this._isHandParticipant(player)) continue;
+        for (const card of player.hand) card.faceUp = true;
+      }
+    }
+    this._setHandPhase('Showdown');
+  }
+
+  /**
+   * The Pick-a-Card Drawing Rail's Draw button. `position` counts down
+   * from the top of the shuffled deck (1 = the top card, the one deal()
+   * would pop next). Server-validated: whole number, 1..cards left.
+   */
+  pickCard(requesterId, position) {
+    if (this.profile !== 'pickcard' || this.handPhase !== 'PickDraw') {
+      return { ok: false, error: 'Picking a card is only available during Pick-a-Card.' };
+    }
+    if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+    if (requesterId !== this.pickTurnPlayerId) return { ok: false, error: "It isn't your turn to pick." };
+    const player = this.getPlayer(requesterId);
+    if (!player) return { ok: false, error: 'Player not found.' };
+    const n = Number(position);
+    if (!Number.isInteger(n) || n < 1 || n > this.deck.length) {
+      return { ok: false, error: `Pick a whole number from 1 to ${this.deck.length}.` };
+    }
+    const [card] = this.deck.splice(this.deck.length - n, 1);
+    card.faceUp = this.gameOptions?.reveal !== 'at-showdown';
+    player.hand.push(card);
+    this._advancePickTurn();
+    return { ok: true };
+  }
+
+  // ---------------------------------------------------------------
+  // NEW 13.0: 7-27 / 15-35, the `vying` profile (spec Part D)
+  // ---------------------------------------------------------------
+
+  /** Cards per player for the Opening Deal, from the Initial Deal option. */
+  _vyingInitialDealCount() {
+    return this.gameOptions?.initialDeal === '3-down-1-reveal' ? 3 : 2;
+  }
+
+  _vyingInitialDealHasReveal() {
+    const v = this.gameOptions?.initialDeal;
+    return v === '2-down-1-reveal' || v === '3-down-1-reveal';
+  }
+
+  /** Participant (dealt in, not folded, not sitting out) and not frozen. All-in players are eligible (drawing is free, as 9.7 set for Discard). */
+  _isEligibleToDraw(player) {
+    return this._isHandParticipant(player) && !player.frozen;
+  }
+
+  _handParticipants() {
+    return this.players.filter((p) => this._isHandParticipant(p));
+  }
+
+  /**
+   * Where a closed InitialBetting/DrawBetting round goes (vying.js's
+   * transition table calls this). One participant left -> Showdown
+   * (Declaration never runs with one participant, D.2). Anyone still
+   * eligible to draw -> the next DrawRound. Everyone frozen -> Declare
+   * directly, without making the Dealer open a round nobody can play.
+   */
+  _vyingPhaseAfterBetting() {
+    const participants = this._handParticipants();
+    if (participants.length <= 1) return 'Showdown';
+    if (participants.some((p) => !p.frozen)) return 'DrawRound';
+    return 'Declare';
+  }
+
+  /** Initial Reveal (D.3): Reveal Complete. The selection stays private (server-held) until everyone is done. */
+  revealComplete(requesterId, cardIds) {
+    if (this.profile !== 'vying' || this.handPhase !== 'InitialReveal') {
+      return { ok: false, error: 'Reveal is only available during the Initial Reveal.' };
+    }
+    const player = this.getPlayer(requesterId);
+    if (!player) return { ok: false, error: 'Player not found.' };
+    if (!this._isHandParticipant(player)) return { ok: false, error: "You aren't in this hand." };
+    if (player.revealDone) return { ok: false, error: 'You have already completed your reveal.' };
+    if (!Array.isArray(cardIds) || cardIds.length === 0) {
+      return { ok: false, error: 'Select at least one card to reveal.' };
+    }
+    const unique = [...new Set(cardIds)];
+    for (const id of unique) {
+      const card = player.hand.find((c) => c.id === id);
+      if (!card) return { ok: false, error: 'You can only reveal cards from your own hand.' };
+      if (card.faceUp) return { ok: false, error: 'That card is already face up.' };
+    }
+    player.revealSelection = unique;
+    player.revealDone = true;
+    this._maybeFinishInitialReveal();
+    return { ok: true };
+  }
+
+  /** When the last participant completes, every selected card turns face up at the same moment. */
+  _maybeFinishInitialReveal() {
+    if (this.profile !== 'vying' || this.handPhase !== 'InitialReveal') return;
+    const participants = this._handParticipants();
+    if (!participants.every((p) => p.revealDone)) return;
+    for (const player of this.players) {
+      if (!Array.isArray(player.revealSelection)) continue;
+      for (const card of player.hand) {
+        if (player.revealSelection.includes(card.id)) card.faceUp = true;
+      }
+    }
+    this._setHandPhase('InitialBetting');
+  }
+
+  /** Dealer's Open Drawing Round (D.2/D.4): the rail starts left of the position anchor and goes once around. */
+  openDrawingRound(requesterId) {
+    const dealer = this.getDealer();
+    if (!dealer || dealer.id !== requesterId) {
+      return { ok: false, error: 'Only the Dealer can open a drawing round.' };
+    }
+    if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+    if (this.profile !== 'vying' || this.handPhase !== 'DrawRound') {
+      return { ok: false, error: 'A drawing round is not available right now.' };
+    }
+    if (this.drawRoundOpen) return { ok: false, error: 'The drawing round is already open.' };
+    this.drawRoundOpen = true;
+    this._drawRoundAnyDrew = false;
+    this._drawQueue = this._seatsClockwiseFromAnchorLeft();
+    this._advanceDrawTurn();
+    return { ok: true };
+  }
+
+  _advanceDrawTurn() {
+    while (this._drawQueue.length > 0) {
+      const id = this._drawQueue.shift();
+      const player = this.getPlayer(id);
+      if (player && this._isEligibleToDraw(player)) {
+        this.drawTurnPlayerId = id;
+        return;
+      }
+    }
+    this.drawTurnPlayerId = null;
+    this._endDrawRound();
+  }
+
+  /** At least one Draw -> DrawBetting. Nobody drew -> Declare, no betting round (Pagat/gamerules.com; Mike's call). */
+  _endDrawRound() {
+    if (this.handPhase !== 'DrawRound') return;
+    this.drawRoundOpen = false;
+    this.drawTurnPlayerId = null;
+    if (this._handParticipants().length <= 1) {
+      this._setHandPhase('Showdown');
+      return;
+    }
+    this._setHandPhase(this._drawRoundAnyDrew ? 'DrawBetting' : 'Declare');
+  }
+
+  _requireDrawTurn(requesterId) {
+    if (this.profile !== 'vying' || this.handPhase !== 'DrawRound' || !this.drawRoundOpen) {
+      return { error: 'There is no open drawing round.' };
+    }
+    if (this.pendingClaim) return { error: 'A claim is pending approval.' };
+    if (requesterId !== this.drawTurnPlayerId) return { error: "It isn't your turn to draw." };
+    const player = this.getPlayer(requesterId);
+    if (!player) return { error: 'Player not found.' };
+    return { player };
+  }
+
+  /** Drawing Rail: Draw 1 Card -- the top card, face up/down per Draw Cards Dealt. Resets the consecutive-pass count. */
+  drawCard(requesterId) {
+    const guard = this._requireDrawTurn(requesterId);
+    if (guard.error) return { ok: false, error: guard.error };
+    if (this.deck.length === 0) return { ok: false, error: 'No cards left in the deck.' };
+    const card = this.deck.pop();
+    card.faceUp = this.gameOptions?.drawCardsDealt === 'up';
+    guard.player.hand.push(card);
+    guard.player.consecutivePasses = 0;
+    this._drawRoundAnyDrew = true;
+    this._advanceDrawTurn();
+    return { ok: true };
+  }
+
+  /** Drawing Rail: Pass. Two in a row (Draws reset the count; betting rounds don't) freezes the player for the hand. */
+  passDraw(requesterId) {
+    const guard = this._requireDrawTurn(requesterId);
+    if (guard.error) return { ok: false, error: guard.error };
+    this._applyDrawPass(guard.player);
+    return { ok: true };
+  }
+
+  _applyDrawPass(player) {
+    player.consecutivePasses += 1;
+    if (player.consecutivePasses >= 2) player.frozen = true;
+    this._advanceDrawTurn();
+  }
+
+  /**
+   * B.1 "leaving the hand mid-phase": called from every path that takes
+   * a player out of a hand (fold bookkeeping, sit-out, grace expiry,
+   * deferred departure). Re-checks whichever player-input phase is
+   * active so it can never hang waiting on someone who has gone -- the
+   * same job _applyFoldBookkeeping() already does for Discard/Declare.
+   */
+  _reconcilePlayerInputPhases() {
+    if (this.profile === 'pickcard' && this.handPhase === 'PickDraw') {
+      const turn = this.pickTurnPlayerId ? this.getPlayer(this.pickTurnPlayerId) : null;
+      if (!turn || !this._isHandParticipant(turn)) this._advancePickTurn();
+      return;
+    }
+    if (this.profile !== 'vying') return;
+    if (this.handPhase === 'InitialReveal') {
+      this._maybeFinishInitialReveal();
+    } else if (this.handPhase === 'DrawRound' && this.drawRoundOpen) {
+      const turn = this.drawTurnPlayerId ? this.getPlayer(this.drawTurnPlayerId) : null;
+      if (!turn || !this._isEligibleToDraw(turn)) this._advanceDrawTurn();
+    } else if (this.handPhase === 'Declare') {
+      this._maybeAdvanceFromDeclare();
+    }
+  }
+
+  /** Folded Hands (B.3): `muck` sends a folding player's cards to the discard pile, out of everyone's view. `leave` (or no option) leaves them exactly as they were. */
+  _applyFoldedHandsRule(player) {
+    if (this.gameOptions?.foldedHands !== 'muck') return;
+    if (!player.hand.length) return;
+    this.discardPile.push(...player.hand);
+    player.hand = [];
+  }
+
+  /** Show All's window (B.3): Folded Hands = leave, the hand is over (CycleComplete), not yet used, and something is still face down. */
+  _showAllAvailable() {
+    return (
+      this.gameOptions?.foldedHands === 'leave' &&
+      this.handPhase === 'CycleComplete' &&
+      !this.showAllUsed &&
+      this.players.some((p) => p.hand.some((c) => !c.faceUp))
+    );
+  }
+
+  /** Dealer's Show All: every face-down card still on the table turns face up, for everyone. No effect on pot or result. */
+  showAll(requesterId) {
+    const dealer = this.getDealer();
+    if (!dealer || dealer.id !== requesterId) {
+      return { ok: false, error: 'Only the Dealer can Show All.' };
+    }
+    if (!this._showAllAvailable()) {
+      return { ok: false, error: 'Show All is only available after the pot is claimed, with Folded Hands left on the table.' };
+    }
+    for (const player of this.players) {
+      for (const card of player.hand) card.faceUp = true;
+    }
+    this.showAllUsed = true;
+    return { ok: true };
   }
 
   /**
@@ -1282,6 +1685,7 @@ class GameTable {
 
   /** NEW 5.0: DiscardPhase -> DrawPhase once every active player has Discarded or Stood Pat. */
   _maybeAdvanceFromDiscardPhase() {
+    // AUDIT 13.0 (B.1): Draw-only; pickcard/vying have no DiscardPhase.
     if (this.profile !== 'draw' || this.handPhase !== 'DiscardPhase') return;
     // CHANGED 10.1 (the-cut-spec_v10-1.md §8.2/§8.3 defect 3): routed
     // through _isHandParticipant() (dealt in, not folded, not sitting
@@ -1306,7 +1710,8 @@ class GameTable {
    * own transition into `Declare` is itself gated on that flag).
    */
   _maybeAdvanceFromDeclare() {
-    if (this.profile !== 'stud' || this.handPhase !== 'Declare') return;
+    // CHANGED 13.0 (spec D.2): vying (7-27/15-35) declares too.
+    if ((this.profile !== 'stud' && this.profile !== 'vying') || this.handPhase !== 'Declare') return;
     // CHANGED 10.1: see _maybeAdvanceFromDiscardPhase()'s matching
     // comment -- same fix, same reasoning (defect 3).
     const active = this.players.filter((p) => this._isHandParticipant(p));
@@ -1368,6 +1773,8 @@ class GameTable {
    * private by default (spec §5.3).
    */
   _defaultFaceUpForPosition(position) {
+    // AUDIT 13.0 (B.1): pickcard never deals; vying's Opening Deal is all
+    // face down (spec D.2) -- both correctly fall through to `false`.
     if (this.profile === 'stud' && Array.isArray(this.gameOptions?.pattern)) {
       const value = this.gameOptions.pattern[position];
       if (value === 'up') return true;
@@ -1458,7 +1865,21 @@ class GameTable {
     const isDraw = this.profile === 'draw';
     const isHoldem = this.profile === 'holdem';
     const isStud = this.profile === 'stud';
+    const isVying = this.profile === 'vying'; // NEW 13.0
     const studDealMatch = isStud ? /^Street([A-E])$/.exec(this.handPhase) : null;
+    // NEW 13.0 (B.1 audit): Pick-a-Card has no deal at all -- cards only
+    // ever arrive through the Pick-a-Card Drawing Rail (pickCard()).
+    if (this.profile === 'pickcard') {
+      return { ok: false, error: 'There is no deal in Pick-a-Card.' };
+    }
+    if (isVying) {
+      if (this.handPhase !== 'OpeningDeal') {
+        return { ok: false, error: 'Deal is only available during the Opening Deal phase.' };
+      }
+      // The count comes from the Initial Deal option, server-side
+      // (Standing Convention) -- whatever the client sent is ignored.
+      cardsPerPlayer = this._vyingInitialDealCount();
+    }
     if (isDraw && this.handPhase !== 'OpeningDeal') {
       return { ok: false, error: 'Deal is only available during the Opening Deal phase.' };
     }
@@ -1877,7 +2298,13 @@ class GameTable {
       }
       this._bringInObligationId = null;
       this._setHandPhase(`Street${ctx.studLetter}Betting`);
+    } else if (ctx.profile === 'vying') {
+      // NEW 13.0 (spec D.2/D.3): the Initial Reveal starts automatically
+      // (no Dealer click) when the Initial Deal includes a reveal.
+      this._setHandPhase(this._vyingInitialDealHasReveal() ? 'InitialReveal' : 'InitialBetting');
     } else {
+      // AUDIT 13.0 (B.1): pickcard can never reach here -- deal() rejects
+      // it outright -- so this remains the no-profile case only.
       this.idle = false; // unchanged pre-5.0 behavior for every other profile
     }
   }
@@ -1927,7 +2354,23 @@ class GameTable {
       // Stacks (both funnel through _forceTerminateCurrentHand() ->
       // this same shared reset).
       player.oweAnte = 0;
+      // NEW 13.0: vying-profile per-hand state (frozen is "cleared at
+      // the start of every hand", spec D.4).
+      player.consecutivePasses = 0;
+      player.frozen = false;
+      player.revealDone = false;
+      player.revealSelection = null;
     }
+    // NEW 13.0: see the constructor's own comment on these fields.
+    this.drawRoundNumber = 0;
+    this.drawRoundOpen = false;
+    this.drawTurnPlayerId = null;
+    this._drawQueue = [];
+    this._drawRoundAnyDrew = false;
+    this._pickRoster = null;
+    this._pickQueue = [];
+    this.pickTurnPlayerId = null;
+    this.showAllUsed = false;
     this.deck.push(...this.discardPile);
     this.discardPile = [];
     this.deck.push(...this.communityCards);
@@ -2350,6 +2793,11 @@ class GameTable {
     const player = this.getPlayer(requesterId);
     if (!player) return { ok: false, error: 'Player not found.' };
     if (player.folded) return { ok: false, error: "You've folded and can't discard." };
+    // NEW 13.0 (B.1 audit): no discard in pickcard/vying (the Initial
+    // Reveal's card selection is its own action, revealComplete()).
+    if (this.profile === 'pickcard' || this.profile === 'vying') {
+      return { ok: false, error: 'Discard is not part of this game.' };
+    }
     const isDraw = this.profile === 'draw';
     if (isDraw) {
       if (this.handPhase !== 'DiscardPhase') {
@@ -2409,6 +2857,7 @@ class GameTable {
     const player = this.getPlayer(requesterId);
     if (!player) return { ok: false, error: 'Player not found.' };
     if (player.folded) return { ok: false, error: "You've folded and can't stand pat." };
+    // AUDIT 13.0 (B.1): already rejects pickcard/vying (not 'draw').
     if (this.profile !== 'draw') {
       return { ok: false, error: 'Stand Pat is only available for the Draw profile.' };
     }
@@ -2470,7 +2919,8 @@ class GameTable {
     if ((player.hand?.length || 0) === 0) {
       return { ok: false, error: 'You have no cards to declare with.' };
     }
-    if (this.profile !== 'stud' || this.handPhase !== 'Declare') {
+    // CHANGED 13.0 (spec D.2): vying uses the same Declaration Rail, as is.
+    if ((this.profile !== 'stud' && this.profile !== 'vying') || this.handPhase !== 'Declare') {
       return { ok: false, error: 'Declare is only available during the Declare phase.' };
     }
     if (value !== 'a' && value !== 'b' && value !== 'both') {
@@ -2504,6 +2954,11 @@ class GameTable {
       return { ok: false, error: 'Only the Dealer can deal to a specific player.' };
     }
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+    // NEW 13.0 (B.1 audit): cards reach players in pickcard/vying only
+    // through their own rails (pickCard()/drawCard()).
+    if (this.profile === 'pickcard' || this.profile === 'vying') {
+      return { ok: false, error: 'Dealing to players directly is not part of this game.' };
+    }
     const isDraw = this.profile === 'draw';
     if (isDraw && this.handPhase !== 'DrawPhase') {
       return { ok: false, error: 'Draw is only available during the Draw phase.' };
@@ -2569,6 +3024,11 @@ class GameTable {
       return { ok: false, error: 'Only the Dealer can deal to a specific player.' };
     }
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+    // NEW 13.0 (B.1 audit): cards reach players in pickcard/vying only
+    // through their own rails (pickCard()/drawCard()).
+    if (this.profile === 'pickcard' || this.profile === 'vying') {
+      return { ok: false, error: 'Dealing to players directly is not part of this game.' };
+    }
     const isDraw = this.profile === 'draw';
     if (isDraw && this.handPhase !== 'DrawPhase') {
       return { ok: false, error: 'Draw is only available during the Draw phase.' };
@@ -2637,6 +3097,10 @@ class GameTable {
       return { ok: false, error: 'Only the Dealer can deal community cards.' };
     }
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+    // NEW 13.0 (B.1 audit): no community cards in pickcard/vying.
+    if (this.profile === 'pickcard' || this.profile === 'vying') {
+      return { ok: false, error: 'Community cards are not part of this game.' };
+    }
     const isHoldem = this.profile === 'holdem';
     const holdemDealPhases = ['Flop', 'Turn', 'River'];
     if (isHoldem && !holdemDealPhases.includes(this.handPhase)) {
@@ -2898,6 +3362,12 @@ class GameTable {
       if (this.handPhase !== 'PreGame' && this.handPhase !== 'CycleComplete') {
         return { ok: false, error: 'You can only start while idle (no hand in progress).' };
       }
+      // NEW 13.0 (spec C.2): Pick-a-Card has no Deal step to enforce
+      // MIN_PLAYERS_TO_DEAL the way every other game's deal() does, so
+      // it's checked here, before antes are requested.
+      if (this.profile === 'pickcard' && this._dealableActivePlayers().length < MIN_PLAYERS_TO_DEAL) {
+        return { ok: false, error: `Need at least ${MIN_PLAYERS_TO_DEAL} active players with chips to start.` };
+      }
       this._enterRequestAntes(true); // clearFolded: true -- a genuine new Cycle
       return { ok: true };
     }
@@ -2979,6 +3449,8 @@ class GameTable {
     // implied by the early return above always requiring it; no longer
     // safe to assume now that the early return also admits hasKillCard-only
     // presets through.
+    // AUDIT 13.0 (B.1): pickcard/vying never get here -- both set
+    // usesReAnteableLoop: false, rejected by the capability check above.
     const stuckFirstBetting =
       this.reAnteable &&
       this.profile === 'draw' &&
@@ -3154,6 +3626,30 @@ class GameTable {
     // whatever type the existing value already is" logic below (that
     // would reject "no-cap" as soon as the stored value happened to be
     // a number, or vice versa). Handled as its own case instead.
+    // NEW 13.0 (spec B.2 + Mike's call to make the Ante check global):
+    // server-side whole-number validation. Ante Amount (every game) >= 0;
+    // Fixed Bet Amount >= 1. The vying profile's Raise Cap is a whole
+    // number >= 1 only -- "No Cap" doesn't apply without No-Limit.
+    if (key === 'anteAmount' || key === 'fixedBet') {
+      const n = Number(value);
+      const min = key === 'anteAmount' ? 0 : 1;
+      if (!Number.isInteger(n) || n < min) {
+        return { ok: false, error: `${key === 'anteAmount' ? 'Ante Amount' : 'Fixed Bet Amount'} must be a whole number of at least ${min}.` };
+      }
+      this.gameOptions[key] = n;
+      return { ok: true };
+    }
+    if (key === 'raiseCap' && this.profile === 'vying' && value === 'no-cap') {
+      return { ok: false, error: 'Raise Cap must be a whole number of at least 1.' };
+    }
+    // NEW 13.0: the new games' choice options only accept their own listed values.
+    if (Object.prototype.hasOwnProperty.call(ENUM_OPTION_VALUES_13_0, key)) {
+      if (!ENUM_OPTION_VALUES_13_0[key].includes(value)) {
+        return { ok: false, error: 'That value is not one of the choices for this option.' };
+      }
+      this.gameOptions[key] = value;
+      return { ok: true };
+    }
     if (key === 'raiseCap') {
       if (value === 'no-cap') {
         this.gameOptions.raiseCap = 'no-cap';
@@ -3270,6 +3766,15 @@ class GameTable {
     }
     if (isStud && !studBettingPhases.includes(this.handPhase)) {
       return { ok: false, error: 'Betting is not available right now.' };
+    }
+    // NEW 13.0 (B.1 audit): vying bets only in its two betting phases and
+    // opens left of the anchor like Draw (the non-Stud path below);
+    // Pick-a-Card has no betting at all.
+    if (this.profile === 'vying' && !['InitialBetting', 'DrawBetting'].includes(this.handPhase)) {
+      return { ok: false, error: 'Betting is not available right now.' };
+    }
+    if (this.profile === 'pickcard') {
+      return { ok: false, error: 'There is no betting in Pick-a-Card.' };
     }
     // NEW 7.0 (§6.8): a genuinely new precondition Draw/Hold'em never
     // needed, since they never require Dealer input to determine who
@@ -3461,6 +3966,7 @@ class GameTable {
       return { ok: false, error: 'Only the Dealer can select the opening bettor.' };
     }
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+    // AUDIT 13.0 (B.1): already rejects pickcard/vying (vying's opener is automatic, left of the anchor).
     if (this.profile !== 'stud') {
       return { ok: false, error: 'Select Opening Bettor is only available for the Stud profile.' };
     }
@@ -3740,6 +4246,12 @@ class GameTable {
    * pre-draw round is Small Bet, the post-draw (final) round Big Bet.
    */
   _fixedLimitSize() {
+    // NEW 13.0 (spec B.2): one bet amount, every round -- every bet and
+    // every raise is exactly `fixedBet`.
+    if (this.profile === 'vying') {
+      return typeof this.gameOptions?.fixedBet === 'number' ? this.gameOptions.fixedBet : 0;
+    }
+    // AUDIT 13.0 (B.1): pickcard never opens betting, falls to `return 0`.
     if (this.profile === 'holdem') {
       const bigBlind = typeof this.gameOptions?.bigBlind === 'number' ? this.gameOptions.bigBlind : 0;
       const isSmall = this.handPhase === 'PreFlopBetting' || this.handPhase === 'FlopBetting';
@@ -4277,12 +4789,17 @@ class GameTable {
       return this._continueDeal(this._dealQueue || []);
     }
 
+    // NEW 13.0 (spec C.2): Pick-a-Card has no Fold anywhere.
+    if (this.profile === 'pickcard') {
+      return { ok: false, error: 'There is no Fold in Pick-a-Card.' };
+    }
     if (isPhaseGated(this.profile) && (this.handPhase === 'Showdown' || this.handPhase === 'Declare')) {
       const player = this.getPlayer(requesterId);
       if (!player) return { ok: false, error: 'Player not found.' };
       if (player.folded) return { ok: false, error: "You've already folded." };
       if (player.sittingOut) return { ok: false, error: "You're sitting out and can't fold." };
       player.folded = true;
+      this._applyFoldedHandsRule(player); // NEW 13.0 (B.3)
       // NEW 9.0 (§6.10): folding removes eligibility for every pot,
       // including ones already contributed to -- recompute immediately,
       // even here at Showdown, since Fold at Showdown (§6.4) can still
@@ -4302,6 +4819,7 @@ class GameTable {
     // StreetABetting; they must Call (pay it) or Raise. Cleared the
     // instant that action resolves (see call()/placeBet() above), so this
     // never blocks Fold for them again this street, let alone any later one.
+    // AUDIT 13.0 (B.1): Stud-only Bring-In; never applies to pickcard/vying.
     if (this.profile === 'stud' && this._bringInObligationId === requesterId) {
       return { ok: false, error: "The Bring-In can't be folded -- call or raise." };
     }
@@ -4309,6 +4827,7 @@ class GameTable {
     const guard = this._requireActingPlayer(requesterId);
     if (guard.error) return { ok: false, error: guard.error };
     guard.player.folded = true;
+    this._applyFoldedHandsRule(guard.player); // NEW 13.0 (B.3)
 
     // NEW 12.6 (Part C.2): only the normal turn-gated betting-round fold
     // logs to streetActionLog -- NOT the Showdown/Declare fold above
@@ -4722,6 +5241,8 @@ class GameTable {
         // is both correct and simpler -- no phase-name enumeration needed,
         // and it can never be fooled by a phase name that doesn't actually
         // reflect what's been dealt.
+        // AUDIT 13.0 (B.1/B.3): Hold'em only, unchanged -- never true for
+        // pickcard/vying. Show All is a separate mechanism (showAll()).
         const isEarlyClaimBeforeRiver = this.profile === 'holdem' && this.communityCards.length < 5;
         this.rabbitHuntAvailable = isEarlyClaimBeforeRiver;
         // CHANGED 10.1 (the-cut-spec_v10-1.md §8.3 defect 11): queued
@@ -4879,6 +5400,10 @@ class GameTable {
     this._foldForSitOut(player);
     player.sittingOut = true;
     player.sitOutPending = false;
+    // NEW 13.0 (B.1): sitting out mid-phase can't hang PickDraw, the
+    // Initial Reveal, or the Drawing Rail (no betting round open, so
+    // _foldForSitOut() alone doesn't cover these).
+    this._reconcilePlayerInputPhases();
     return { ok: true };
   }
 
@@ -4998,6 +5523,21 @@ class GameTable {
       burnedThisHand: this.burnedThisHand,
       rabbitHuntAvailable: this.rabbitHuntAvailable,
       rabbitHuntCards: this.rabbitHuntCards,
+      // NEW 13.0 (spec B.1 Standing Convention): every new gate, computed
+      // here, read directly by the client.
+      showAllAvailable: this._showAllAvailable(),
+      drawRoundNumber: this.drawRoundNumber,
+      drawRoundOpen: this.drawRoundOpen,
+      drawTurnPlayerId: this.drawTurnPlayerId,
+      drawCardAvailable: this.deck.length > 0,
+      initialDealCount: this.profile === 'vying' ? this._vyingInitialDealCount() : null,
+      pickTurnPlayerId: this.pickTurnPlayerId,
+      // NEW 13.0: the server's own Fixed-Limit size for the current
+      // round, so the client's single-bet button reads it instead of
+      // re-deriving it (used for vying; the older profiles' client-side
+      // derivation is left as it was).
+      fixedLimitSize: this._fixedLimitSize(),
+      pickRange: this.profile === 'pickcard' && this.handPhase === 'PickDraw' ? { min: 1, max: this.deck.length } : null,
       idle: this.idle,
       bettingRoundsThisHand: this.bettingRoundsThisHand,
       discardWindowOpen: this.discardWindowOpen,
@@ -5137,6 +5677,12 @@ class GameTable {
         // (p.revealed), matching the spec's own visibility rule ("shown
         // alongside their cards once they use Show Cards, not before").
         declaration: p.id === forPlayerId || p.revealed ? p.declaration : null,
+        // NEW 13.0 (spec D.3/D.4): public status only. The Initial Reveal
+        // selection itself (p.revealSelection) is never sent to anyone --
+        // the chosen cards simply turn face up once everyone is done.
+        frozen: p.frozen,
+        revealDone: p.revealDone,
+        eligibleToDraw: this.profile === 'vying' ? this._isEligibleToDraw(p) : false,
       })),
     };
   }

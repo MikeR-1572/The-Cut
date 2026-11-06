@@ -354,7 +354,9 @@ test('GAME_CHOICES: declareOptions present on every declareHighLowBoth preset, w
 });
 
 test('GAME_CHOICES: declareHighLowBoth set on exactly the three split-declare presets', () => {
-  const flagged = GAME_CHOICES.filter((g) => g.hiddenOptions?.declareHighLowBoth === true).map((g) => g.id);
+  // CHANGED 13.0: scoped to the Stud profile -- 7-27/15-35 (vying)
+  // also declare High/Low/Both now (spec D.2), checked in 13.0's own tests.
+  const flagged = GAME_CHOICES.filter((g) => g.profile === 'stud' && g.hiddenOptions?.declareHighLowBoth === true).map((g) => g.id);
   assert.deepStrictEqual(
     flagged.sort(),
     ['stud-7card-baseball-hilo', 'stud-7card-high-chicago', 'stud-7card-low-chicago'].sort()
@@ -385,7 +387,8 @@ test('GAME_CHOICES: audible is a universal Dealer Option, present on every prese
 });
 
 test('GAME_CHOICES: the 16-preset locked-down set, old renamed/deleted/split ids confirmed gone or renamed', () => {
-  const ids = GAME_CHOICES.map((g) => g.id);
+  // CHANGED 13.0: the original locked-down 16 (every non-Home-Game-Favorites entry).
+  const ids = GAME_CHOICES.filter((g) => g.menuGroup !== 'home-favorites').map((g) => g.id);
   assert.strictEqual(ids.length, 16);
   assert.ok(ids.includes('stud-7card-razz')); // renamed from stud-7card-lowball
   assert.ok(ids.includes('stud-7card-stud8')); // renamed from stud-7card-highlow

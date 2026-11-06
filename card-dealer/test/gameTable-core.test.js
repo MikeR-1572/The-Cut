@@ -745,7 +745,10 @@ test('GAME_CHOICES: 16 presets loaded, covering all three profiles', () => {
   const draw = GAME_CHOICES.filter((g) => g.profile === 'draw');
   const stud = GAME_CHOICES.filter((g) => g.profile === 'stud');
   const holdem = GAME_CHOICES.filter((g) => g.profile === 'holdem');
-  assert.strictEqual(GAME_CHOICES.length, 16);
+  // CHANGED 13.0: the catalog grows by three Home Game Favorites
+  // (pickcard/vying profiles); the original 16 are still exactly these.
+  assert.strictEqual(GAME_CHOICES.length, 19);
+  assert.strictEqual(draw.length + stud.length + holdem.length, 16);
   assert.strictEqual(draw.length, 3);
   assert.strictEqual(stud.length, 10);
   assert.strictEqual(holdem.length, 3);

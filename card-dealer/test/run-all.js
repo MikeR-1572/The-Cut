@@ -43,5 +43,6 @@ require('./gameTable-11-3.test');
 require('./gameTable-11-4.test');
 require('./gameTable-13-0.test'); // NEW 13.0
 require('./gameTable-13-1.test'); // NEW 13.1
+require('./gameTable-13-2.test'); // NEW 13.2
 
 console.log('\nDone.');

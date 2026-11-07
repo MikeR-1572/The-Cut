@@ -72,7 +72,7 @@ test('13.0 E.1: existing entries keep their 12.x groups; Home Game Favorites hol
   assert.strictEqual(byId['draw-5card'], 'draw');
   assert.strictEqual(byId['stud-5card'], 'stud');
   assert.strictEqual(byId['stud-7card'], 'stud');
-  for (const g of GAME_CHOICES.filter((x) => x.id.startsWith('stud-7card-'))) assert.strictEqual(g.menuGroup, 'stud-variants');
+  for (const g of GAME_CHOICES.filter((x) => x.id.startsWith('stud-7card-'))) assert.strictEqual(g.menuGroup, 'stud-variants'); // (13.2's No Peek included)
   for (const g of GAME_CHOICES.filter((x) => x.profile === 'holdem')) assert.strictEqual(g.menuGroup, 'holdem');
   const home = GAME_CHOICES.filter((g) => g.menuGroup === 'home-favorites').map((g) => g.id);
   assert.deepStrictEqual(home, ['home-7-27', 'home-15-35', 'home-pick-a-card']);
@@ -486,7 +486,8 @@ test('13.0 E.14: existing presets are unaffected -- profiles, phase entry, and n
   assert.strictEqual(draw.handPhase, 'FirstBetting');
   assert.strictEqual(draw.toRedactedState('p1').showAllAvailable, false);
   assert.strictEqual(draw.toRedactedState('p1').initialDealCount, null);
-  for (const g of GAME_CHOICES.filter((x) => !x.id.startsWith('home-'))) {
+  // CHANGED 13.2: 7-Card No Peek (nopeek) joins the non-Home-Favorites entries.
+  for (const g of GAME_CHOICES.filter((x) => !x.id.startsWith('home-') && x.id !== 'stud-7card-no-peek')) {
     assert.ok(['draw', 'stud', 'holdem'].includes(g.profile));
   }
 });

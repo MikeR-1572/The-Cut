@@ -313,8 +313,14 @@
         </div>
 
         <!-- NEW 13.0 (spec D.2/D.4): 7-27 / 15-35 drawing rounds. -->
+        <!-- NEW 13.2 (the-cut-spec_v13-2.md B.6): No Peek -- after a reveal
+             ends with Open Betting, before betting opens. -->
+        <div class="rail-group" id="reject-reveal-group" hidden>
+          <button class="btn btn-secondary" id="btn-reject-reveal" type="button" title="That hand doesn't beat the high hand -- send the reveal back to the same player">Reject</button>
+        </div>
+
         <div class="rail-group" id="open-drawing-group" hidden>
-          <button class="btn btn-secondary" id="btn-open-drawing" type="button" title="Start the drawing round -- each player in turn may Draw 1 Card or Pass">Open Drawing Round</button>
+          <button class="btn btn-secondary" id="btn-open-drawing" type="button" title="Start the drawing round -- each player in turn may Draw Card or Pass">Open Drawing Round</button>
         </div>
 
         <div class="rail-divider" id="game-section-divider" hidden></div>
@@ -408,8 +414,14 @@
         <!-- NEW 13.0 (spec D.4): the Drawing Rail -- shown only to the
              player whose turn it is. -->
         <div class="personal-draw-action" id="personal-draw-action" hidden>
-          <button class="btn btn-primary" id="btn-draw-card" type="button" title="Take the top card of the deck">Draw 1 Card</button>
+          <button class="btn btn-primary" id="btn-draw-card" type="button" title="Take the top card of the deck">Draw Card</button>
           <button class="btn btn-secondary" id="btn-pass-draw" type="button" title="Take no card this round">Pass</button>
+        </div>
+        <!-- NEW 13.2 (B.5): No Peek's Reveal Rail -- the revealer only. -->
+        <div class="personal-nopeek-action" id="personal-nopeek-action" hidden>
+          <button class="btn btn-primary" id="btn-reveal-next" type="button">Reveal Next</button>
+          <button class="btn btn-secondary" id="btn-reveal-open-betting" type="button">Open Betting</button>
+          <button class="btn btn-secondary" id="btn-reveal-fold" type="button" title="Fold now -- your remaining cards stay hidden">Fold</button>
         </div>
         <div class="personal-declare-action" id="personal-declare-action" hidden>
           <span class="personal-action-label">Declare for the pot:</span>

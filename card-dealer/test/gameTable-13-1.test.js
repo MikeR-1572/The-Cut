@@ -233,11 +233,12 @@ test('13.1 A.1/A.4: player-facing wording -- "Fixed Bet" error and one "All In" 
   assert.strictEqual(broke.allIn('p1').ok, false);
 });
 
-test('13.1 Part 0: package.json and package-lock.json both say 13.1.0', () => {
+// CHANGED 13.2: the agreement check stays; the expected version follows the release.
+test('13.2 Part 0: package.json and package-lock.json both say 13.2.0', () => {
   const root = path.join(__dirname, '..');
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
-  assert.strictEqual(pkg.version, '13.1.0');
+  assert.strictEqual(pkg.version, '13.2.0');
   assert.strictEqual(lock.version, pkg.version);
   assert.strictEqual(lock.packages[''].version, pkg.version);
 });

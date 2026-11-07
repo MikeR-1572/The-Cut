@@ -424,6 +424,26 @@
     "finalStreet": "E"
   },
   {
+    "id": "stud-7card-no-peek",
+    "displayName": "7-Card No Peek",
+    "profile": "nopeek",
+    "menuGroup": "stud-variants",
+    "description": "7-Card No Peek - Flip cards over to match or beat high hand",
+    "rules": "DRAFT (Dev) -- Mike to replace.\n\nEach player is dealt 7 cards face down. Nobody may look at their own cards -- not even the owner.\n\nThe player to the Dealer's left turns over their first card, and a betting round follows. After that, each player in turn flips their cards over one at a time until they have the high hand (see the Flip Cards Until option), then a betting round follows. A player who runs out of cards without beating the high hand, or who folds, is out of the hand.\n\nPlay continues until only one player is left, or every card has been turned over. Last player standing claims the pot.",
+    "hiddenOptions": {
+      "anteType": "flat",
+      "bettingStructure": "fixed-limit"
+    },
+    "dealerOptions": {
+      "anteAmount": 1,
+      "fixedBet": 1,
+      "raiseCap": 3,
+      "flipUntil": "tie-or-best",
+      "foldedHands": "leave",
+      "audible": ""
+    }
+  },
+  {
     "id": "holdem-texas",
     "displayName": "Texas Hold'em",
     "profile": "holdem",

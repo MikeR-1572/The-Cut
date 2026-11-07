@@ -369,6 +369,13 @@ wss.on('connection', (ws, req) => {
       // NEW 13.1 (the-cut-spec_v13-1.md Part F)
       case 'restoreDefaultOptions':
         return handleNewGameAction(ws, (t, id) => t.restoreDefaultOptions(id));
+      // NEW 13.2 (the-cut-spec_v13-2.md Part B)
+      case 'revealNext':
+        return handleNewGameAction(ws, (t, id) => t.revealNext(id));
+      case 'revealOpenBetting':
+        return handleNewGameAction(ws, (t, id) => t.revealOpenBetting(id));
+      case 'rejectRevealOpen':
+        return handleNewGameAction(ws, (t, id) => t.rejectRevealOpen(id));
       case 'payDealInterrupt':
         return handlePayDealInterrupt(ws);
       case 'buyDealInterrupt':

@@ -376,6 +376,13 @@
     personalDrawAction: document.getElementById('personal-draw-action'),
     btnDrawCard: document.getElementById('btn-draw-card'),
     btnPassDraw: document.getElementById('btn-pass-draw'),
+    // NEW 13.2 (B.5/B.6): No Peek
+    personalNopeekAction: document.getElementById('personal-nopeek-action'),
+    btnRevealNext: document.getElementById('btn-reveal-next'),
+    btnRevealOpenBetting: document.getElementById('btn-reveal-open-betting'),
+    btnRevealFold: document.getElementById('btn-reveal-fold'),
+    rejectRevealGroup: document.getElementById('reject-reveal-group'),
+    btnRejectReveal: document.getElementById('btn-reject-reveal'),
     btnDeclareA: document.getElementById('btn-declare-a'),
     btnDeclareB: document.getElementById('btn-declare-b'),
     btnDeclareBoth: document.getElementById('btn-declare-both'),
@@ -1001,6 +1008,16 @@
       Showdown: '♣♥ SHOWDOWN ♦♠',
       CycleComplete: "THE CUT \u2013 Dealer's Choice",
     },
+    // NEW 13.2 (B.4): 7-Card No Peek. {r} = the server's revealRoundNumber.
+    nopeek: {
+      PreGame: "THE CUT \u2013 Dealer's Choice",
+      RequestAntes: 'Pay Antes',
+      OpeningDeal: 'Deal Cards',
+      Reveal: '{r} Reveal',
+      RevealBetting: '{r} Reveal Betting Round',
+      Showdown: 'Last Man Standing \u2013 Claim Pot',
+      CycleComplete: "THE CUT \u2013 Dealer's Choice",
+    },
     stud7: {
       PreGame: "THE CUT \u2013 Dealer's Choice",
       RequestAntes: 'Pay Antes',
@@ -1044,8 +1061,13 @@
     // ('D' or 'E'); before any Game Choice is selected, it's still the
     // constructor default and never actually looked up (handPhase stays
     // 'PreGame' the whole time, caught by the fallback below either way).
+    // AUDIT 13.2: nopeek has its own PHASE_BANNER_TEXT entry (not the Stud tables).
     const table = gameTable.profile === 'stud' ? PHASE_BANNER_TEXT[gameTable.finalStreet === 'D' ? 'stud5' : 'stud7'] : PHASE_BANNER_TEXT[gameTable.profile];
-    if (table && table[gameTable.handPhase]) return table[gameTable.handPhase].replace('{n}', ordinal(gameTable.drawRoundNumber || 1));
+    if (table && table[gameTable.handPhase]) {
+      return table[gameTable.handPhase]
+        .replace('{n}', ordinal(gameTable.drawRoundNumber || 1))
+        .replace('{r}', ordinal(gameTable.revealRoundNumber || 1)); // NEW 13.2
+    }
     return "THE CUT \u2013 Dealer's Choice"; // flexible-toolbox profiles: handPhase never leaves PreGame
   }
 
@@ -1266,6 +1288,24 @@
     hideTableError();
     send('openDrawingRound');
   });
+  // NEW 13.2 (B.5/B.6): No Peek actions -- every gate is server-side.
+  el.btnRevealNext.addEventListener('click', () => {
+    hideTableError();
+    send('revealNext');
+  });
+  el.btnRevealOpenBetting.addEventListener('click', () => {
+    hideTableError();
+    send('revealOpenBetting');
+  });
+  el.btnRevealFold.addEventListener('click', () => {
+    hideTableError();
+    send('fold');
+  });
+  el.btnRejectReveal.addEventListener('click', () => {
+    hideTableError();
+    send('rejectRevealOpen');
+  });
+
   el.btnDrawCard.addEventListener('click', () => {
     hideTableError();
     send('drawCard');
@@ -1509,7 +1549,7 @@
     // be smart about it.
     if (gameTable?.reAnteable) {
       const proceed = await appConfirm(
-        "This is a re-ante game \u2014 if this hand doesn't reach a conclusion, a new hand may be dealt and you won't have enough chips to cover the new ante. You'll be excluded from that deal if it happens. Go All-In anyway?",
+        "This is a re-ante game \u2014 if this hand doesn't reach a conclusion, a new hand may be dealt and you won't have enough chips to cover the new ante. You'll be excluded from that deal if it happens. Go All In anyway?",
         { confirmLabel: 'Go All In', cancelLabel: 'Cancel' }
       );
       if (!proceed) return;
@@ -2086,6 +2126,7 @@
     const gameTable = state.lastGameTable;
     const seatedCount = gameTable?.players?.length || 0;
     // AUDIT 13.0 (B.1): Stud-only warning; not applicable to pickcard/vying.
+    // AUDIT 13.2: nopeek's 7-player limit is enforced server-side (startGame/deal).
     if (gameTable?.profile === 'stud' && gameTable?.finalStreet === 'E' && seatedCount >= 7) {
       el.studWarningDialog.showModal();
       return;
@@ -2771,6 +2812,7 @@
     initialDeal: 'Initial Deal',
     drawCardsDealt: 'Draw Cards Dealt',
     freezeAfter: 'Freeze After', // NEW 13.1 (B.3)
+    flipUntil: 'Flip Cards Until', // NEW 13.2 (B.1), information only
     overUnder: 'Over / Under',
     foldedHands: 'Folded Hands',
     // REMOVED 13.1 (B.1): naturalsWin.
@@ -2819,6 +2861,7 @@
     // buildOptionField() converts the <select>'s string back on send.
     freezeAfter: [2, 3, 4, 5, 'never'],
     // REMOVED 13.1 (B.1): naturalsWin.
+    flipUntil: ['tie-or-best', 'best'], // NEW 13.2 (B.1)
   };
 
   /** NEW 13.0 (spec C.1/D.1): dropdown text for the new games' options, per stored value. */
@@ -2833,6 +2876,8 @@
     foldedHands: { muck: 'Mucked on Fold', leave: 'Left on Table' },
     // NEW 13.1 (B.3)
     freezeAfter: { 2: '2 Skipped Draws', 3: '3 Skipped Draws', 4: '4 Skipped Draws', 5: '5 Skipped Draws', never: 'Never Freeze' },
+    // NEW 13.2 (B.1)
+    flipUntil: { 'tie-or-best': 'Tie or Have Best Hand', best: 'Have Best Hand' },
   };
 
   /** NEW 9.1 (§10.5): dropdown display text for bettingStructure's raw stored values. */
@@ -3132,6 +3177,7 @@
    * moment this fires from the dropdown's own change handler.
    */
   function pushComputedBets(gameTable, sourceValueOverride, structureOverride) {
+    // AUDIT 13.2: nopeek likewise (single stored fixedBet).
     // AUDIT 13.0 (B.1): pickcard/vying have no COMPUTED_BET_SOURCE entry
     // (vying's one bet amount is its own stored fixedBet), so this
     // returns immediately for both.
@@ -3211,7 +3257,10 @@
     const dealerOptionKeys = preset?.dealerOptions ? new Set(Object.keys(preset.dealerOptions)) : null;
     const has = (key) => !dealerOptionKeys || dealerOptionKeys.has(key);
 
-    if (state.gameOptionsEditorFor !== gameTable.gameChoiceId && (gameTable.profile === 'vying' || gameTable.profile === 'pickcard')) {
+    if (
+      state.gameOptionsEditorFor !== gameTable.gameChoiceId &&
+      (gameTable.profile === 'vying' || gameTable.profile === 'pickcard' || gameTable.profile === 'nopeek') // CHANGED 13.2: + nopeek
+    ) {
       state.gameOptionsEditorFor = gameTable.gameChoiceId;
       buildNewGameOptionsFields(gameTable, editable, has);
     } else if (state.gameOptionsEditorFor !== gameTable.gameChoiceId) {
@@ -3372,7 +3421,10 @@
    * No mockup for this (spec B.5): Mike reviews the layout live.
    */
   function buildNewGameOptionsFields(gameTable, editable, has) {
-    const isVying = gameTable.profile === 'vying';
+    // CHANGED 13.2 (B.1): No Peek shares 7-27's Limits and Antes & Bets
+    // layout (Raise Cap; Ante Amount + Fixed Bet); its game row is Flip
+    // Cards Until and Folded Hands.
+    const isVying = gameTable.profile === 'vying' || gameTable.profile === 'nopeek';
     const present = (key) => has(key) && gameTable.gameOptions[key] !== undefined;
 
     el.optionsLimitsFields.innerHTML = '';
@@ -3396,7 +3448,12 @@
 
     el.optionsWildcardRow.innerHTML = '';
     // CHANGED 13.1: Freeze After added after Draw Cards Dealt (B.3); Naturals removed (B.1).
-    const gameKeys = isVying ? ['initialDeal', 'drawCardsDealt', 'freezeAfter', 'overUnder', 'foldedHands'] : ['reveal'];
+    const gameKeys =
+      gameTable.profile === 'nopeek'
+        ? ['flipUntil', 'foldedHands']
+        : isVying
+          ? ['initialDeal', 'drawCardsDealt', 'freezeAfter', 'overUnder', 'foldedHands']
+          : ['reveal'];
     const grid = document.createElement('div');
     grid.className = 'options-field-grid';
     for (const key of gameKeys) {
@@ -3736,16 +3793,20 @@
     el.claimBannerActions.hidden = !isApprover;
   }
 
-  /** NEW 13.1 (C.1): "[Name] Is Drawing" / "[Name] Is Picking a Card", or null. */
+  /** NEW 13.1 (C.1): "[Name] Is Deciding" (13.2 A.1) / "[Name] Is Picking a Card" / "[Name] Is Revealing" (13.2 B.4), or null. */
   function drawPickWaitingText(gameTable) {
     let turnId = null;
     let verb = '';
     if (gameTable.profile === 'vying' && gameTable.handPhase === 'DrawRound' && gameTable.drawRoundOpen) {
       turnId = gameTable.drawTurnPlayerId;
-      verb = 'Is Drawing';
+      verb = 'Is Deciding'; // CHANGED 13.2 (A.1), was 'Is Drawing'
     } else if (gameTable.profile === 'pickcard' && gameTable.handPhase === 'PickDraw') {
       turnId = gameTable.pickTurnPlayerId;
       verb = 'Is Picking a Card';
+    } else if (gameTable.profile === 'nopeek' && gameTable.handPhase === 'Reveal') {
+      // NEW 13.2 (B.4): "[Name] Is Revealing", same spot and style.
+      turnId = gameTable.revealTurnPlayerId;
+      verb = 'Is Revealing';
     }
     if (!turnId || turnId === state.playerId) return null;
     const turnPlayer = gameTable.players.find((p) => p.id === turnId);
@@ -3821,7 +3882,7 @@
     // CHANGED 10.1: `me.isHandParticipant` (server-computed) replaces the
     // inline `!me.folded && !me.sittingOut` -- same value today, but no
     // longer a second independent copy of that combination.
-    // CHANGED 13.0 (spec D.2): vying uses the same Declaration Rail.
+    // CHANGED 13.0 (spec D.2): vying uses the same Declaration Rail. AUDIT 13.2: nopeek has no Declaration.
     const showDeclareAction =
       !!me &&
       (gameTable.profile === 'stud' || gameTable.profile === 'vying') &&
@@ -3835,6 +3896,7 @@
     const showRevealAction =
       !!me && gameTable.profile === 'vying' && gameTable.handPhase === 'InitialReveal' && me.isHandParticipant && !me.revealDone;
     const showDrawAction = !!me && gameTable.drawRoundOpen && gameTable.drawTurnPlayerId === me.id;
+    const showNopeekRevealAction = !!me && gameTable.profile === 'nopeek' && gameTable.handPhase === 'Reveal' && gameTable.revealTurnPlayerId === me.id; // NEW 13.2
 
     // BUG FIX: showFoldAtShowdown is now included here -- previously
     // Fold's own leaf-level hidden flag could be false while this parent
@@ -3852,6 +3914,7 @@
       showPickAction ||
       showRevealAction ||
       showDrawAction ||
+      showNopeekRevealAction ||
       !!drawPickWaitingText(gameTable) // NEW 13.1 (C.1): the shared line needs the rail visible
     );
 
@@ -3894,7 +3957,7 @@
       // label ("bring in"/"Bring In" instead of "current bet"/"Current
       // Bet", cased to match whichever format is active) -- same
       // underlying value either way, no other change.
-      const bringInActive = gameTable.profile === 'stud' && gameTable.bringInObligationId;
+      const bringInActive = gameTable.profile === 'stud' && gameTable.bringInObligationId; // AUDIT 13.2: no Bring-In in nopeek
       const asideLabel = bringInActive ? 'bring in' : 'current bet';
       const asideLabelTitleCase = bringInActive ? 'Bring In' : 'Current Bet';
       const toYou = me ? Math.max(0, gameTable.currentBetToCall - me.currentBet) : 0;
@@ -4013,7 +4076,7 @@
           // directly-configured smallBet/bigBet, since neither has
           // blinds to derive anything from.
           let fixedSize;
-          if (gameTable.profile === 'vying') {
+          if (gameTable.profile === 'vying' || gameTable.profile === 'nopeek') { // CHANGED 13.2: + nopeek
             // NEW 13.0 (spec B.2): one amount for every round, read from
             // the server's own _fixedLimitSize() (Standing Convention).
             fixedSize = gameTable.fixedLimitSize || 0;
@@ -4303,6 +4366,20 @@
     // NEW 13.0 (spec D.3): Reveal Rail. Selection reuses the same
     // click-to-select mechanism as Draw's Discard (state.discardSelection).
     el.personalRevealAction.hidden = !showRevealAction;
+
+    // NEW 13.2 (B.5): No Peek's Reveal Rail -- the revealer only. Every
+    // enable/disable comes straight from the server (revealNextAvailable,
+    // openBettingAvailable); Fold is always available to the revealer.
+    el.personalNopeekAction.hidden = !showNopeekRevealAction;
+    if (showNopeekRevealAction) {
+      el.btnRevealNext.disabled = !gameTable.revealNextAvailable;
+      el.btnRevealNext.title = gameTable.revealNextAvailable ? 'Turn your next card (the leftmost face-down one) face up for everyone' : 'You have no face-down cards left';
+      el.btnRevealOpenBetting.disabled = !gameTable.openBettingAvailable;
+      // CHANGED BUILDFIX 13.2 (Mike): Open Betting is always available
+      // (the Dealer's Reject covers mistakes), so the old "reveal a card
+      // first" tooltip is gone.
+      el.btnRevealOpenBetting.title = 'You think you now have the high hand -- end your reveal and go to betting';
+    }
 
     // NEW 13.0 (spec D.4): Drawing Rail. Draw 1 Card disabled (with the
     // spec's tooltip) once the deck is empty; Pass always works.
@@ -4594,11 +4671,24 @@
       info.appendChild(allInBadge);
     }
     // NEW 13.0 (spec D.4): Frozen -- skipped by the Drawing Rail for the rest of the hand.
-    if (player.frozen) {
+    // CHANGED 13.2 (A.4): one badge in the Frozen spot -- "Skipped 1 of 3",
+    // "Skipped 2 of 3", then "Frozen" at the Freeze After threshold
+    // ("Skipped N" with Never Freeze). The count is the server's own
+    // consecutivePasses (skips in a row); hidden at 0, so it goes away
+    // when the player draws.
+    if (gameTable.profile === 'vying' && (player.frozen || (player.consecutivePasses || 0) > 0)) {
       const frozenBadge = document.createElement('span');
       frozenBadge.className = 'seat-frozen-badge';
-      frozenBadge.title = `${player.name} passed twice in a row and takes no more cards this hand`;
-      frozenBadge.textContent = 'Frozen';
+      const freezeAfter = gameTable.gameOptions?.freezeAfter;
+      if (player.frozen) {
+        frozenBadge.title = `${player.name} skipped ${player.consecutivePasses} draws in a row and takes no more cards this hand`;
+        frozenBadge.textContent = 'Frozen';
+      } else {
+        frozenBadge.classList.add('seat-frozen-badge--skipped');
+        frozenBadge.title = `${player.name} has skipped ${player.consecutivePasses} draw${player.consecutivePasses === 1 ? '' : 's'} in a row`;
+        frozenBadge.textContent =
+          freezeAfter === 'never' ? `Skipped ${player.consecutivePasses}` : `Skipped ${player.consecutivePasses} of ${freezeAfter}`;
+      }
       info.appendChild(frozenBadge);
     }
     // NEW 13.0 (spec D.3): "Revealed ✓" -- only that the player has
@@ -4699,7 +4789,8 @@
       anteBadge.textContent = `Owes $${player.oweAnte}`;
       info.appendChild(anteBadge);
     }
-    if (isYou && !player.revealed && (player.handCount || 0) > 0) {
+    // CHANGED 13.2 (B.3): no Show Cards in No Peek (the server rejects it too).
+    if (isYou && !player.revealed && (player.handCount || 0) > 0 && !gameTable.cardsHiddenFromOwner) { // BUILDFIX 13.2: follows the cards, not the selected game
       const showBtn = document.createElement('button');
       showBtn.className = 'seat-show-cards';
       showBtn.type = 'button';
@@ -4738,7 +4829,8 @@
       // only, and only until Reveal Complete. Pick-a-Card has nothing
       // to select at all.
       const inReveal = gameTable.handPhase === 'InitialReveal' && gameTable.profile === 'vying';
-      const selectable = isYou && isRealCard && gameTable.profile !== 'pickcard' && (!inReveal || (!entry.faceUp && !player.revealDone));
+      const selectable =
+        isYou && isRealCard && gameTable.profile !== 'pickcard' && gameTable.profile !== 'nopeek' && (!inReveal || (!entry.faceUp && !player.revealDone)); // CHANGED 13.2: no selection in No Peek
       if (selectable) {
         cardEl.classList.add('is-selectable');
         cardEl.title = inReveal ? 'Click to select for Reveal' : 'Click to select for Discard';
@@ -4898,7 +4990,7 @@
   // 6.2, Stud's Select Opening Bettor 7.1, New Hand 7.2) structurally
   // impossible going forward -- see renderDealerRail() below for how.
   function lockableControls() {
-    return [el.btnNewHand, el.btnDeal, el.btnDealToPlayer, el.btnOpenBetting, el.btnDealCommunity, el.btnReshuffle, el.btnPassBuck, el.openingBettorSelect, el.btnOpenDrawing, el.btnShowAll]; // CHANGED 13.0: + Open Drawing Round, Show All
+    return [el.btnNewHand, el.btnDeal, el.btnDealToPlayer, el.btnOpenBetting, el.btnDealCommunity, el.btnReshuffle, el.btnPassBuck, el.openingBettorSelect, el.btnOpenDrawing, el.btnShowAll, el.btnRejectReveal]; // CHANGED 13.0: + Open Drawing Round, Show All; 13.2: + Reject
   }
 
   function renderDealerRail(gameTable, isDealer) {
@@ -4958,6 +5050,7 @@
    */
   function renderPassTheBuckOnlyRail(gameTable) {
     el.rabbitHuntGroup.hidden = true;
+    el.rejectRevealGroup.hidden = true; // NEW 13.2
     el.showAllGroup.hidden = true; // NEW 13.0
     el.openDrawingGroup.hidden = true; // NEW 13.0
     el.dealSectionDivider.hidden = true;
@@ -5205,9 +5298,13 @@
 
     // NEW 13.0 (spec D.2): Open Drawing Round -- vying only (railTables.js).
     el.openDrawingGroup.hidden = !view.openDrawing?.visible;
+    // NEW 13.2 (B.6): Reject -- No Peek only, server's rejectAvailable.
+    el.rejectRevealGroup.hidden = !view.reject?.visible;
     // NEW 13.1 (C.2): "Open 1st/2nd/3rd... Drawing Round" -- same server
     // counter and ordinal helper as the "Nth Draw" banner.
-    el.btnOpenDrawing.textContent = `Open ${ordinal(gameTable.drawRoundNumber || 1)} Drawing Round`;
+    // CHANGED 13.2 (A.3): always break after the ordinal ("Open 2nd" /
+    // "Drawing Round"), via white-space: pre-line in style.css.
+    el.btnOpenDrawing.textContent = `Open ${ordinal(gameTable.drawRoundNumber || 1)}\nDrawing Round`;
 
     // Stud's Select Opening Bettor (\u00a76.8). Never applies to Draw/Hold'em.
     el.openingBettorGroup.hidden = !view.openingBettor?.visible;
@@ -5252,11 +5349,13 @@
 
   /** Pre-5.0 flexible-toolbox model -- now only reachable when no Game Choice is active at all, since Draw, Hold'em, and (NEW 7.0) Stud all run their own phase-gated rail. Kept for that edge case and any future profile that doesn't adopt the phase machine. */
   function renderFlexibleToolboxRail(gameTable) {
+    // AUDIT 13.2: nopeek too (it has a RAIL_TABLES entry).
     // AUDIT 13.0 (B.1): pickcard/vying never reach this function -- both
     // have RAIL_TABLES entries, so renderDealerRail() routes them to
     // renderPhaseGatedRail(). Their two new groups are hidden here anyway.
     el.showAllGroup.hidden = true;
     el.openDrawingGroup.hidden = true;
+    el.rejectRevealGroup.hidden = true; // NEW 13.2
     el.openBettingGroup.hidden = false;
     el.openingBettorGroup.hidden = true; // Stud-only (§6.8) -- Stud never reaches this function as of 7.0
     el.btnOpenBetting.disabled = gameTable.bettingOpen;

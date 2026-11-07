@@ -96,6 +96,10 @@ const ACTION_METHODS = {
   showAll: 0,
   // NEW 13.1
   restoreDefaultOptions: 0,
+  // NEW 13.2
+  revealNext: 0,
+  revealOpenBetting: 0,
+  rejectRevealOpen: 0,
 };
 
 /**

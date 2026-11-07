@@ -22,7 +22,12 @@ const ENUM_OPTION_VALUES_13_0 = {
   overUnder: ['over-busts', 'under-trumps', 'nearest'],
   foldedHands: ['muck', 'leave'],
   // REMOVED 13.1 (Part B.1): naturalsWin.
+  flipUntil: ['tie-or-best', 'best'], // NEW 13.2 (B.1), information only
 };
+
+/** NEW 13.2 (Part B.2): 7-Card No Peek's player limit and message. */
+const NOPEEK_MAX_PLAYERS = 7;
+const NOPEEK_TOO_MANY_PLAYERS = '7-Card No Peek allows at most 7 players \u2014 someone will need to sit out.';
 
 /** NEW 13.1 (Part B.3): every value Freeze After accepts. */
 const FREEZE_AFTER_VALUES = [2, 3, 4, 5, 'never'];
@@ -255,12 +260,27 @@ class GameTable {
     this.pickTurnPlayerId = null;
     //   shared: Show All (B.3), once per hand.
     this.showAllUsed = false;
+    // BUILDFIX 13.2: true while the cards on the table were dealt under
+    // No Peek. Follows the cards, not the currently selected game.
+    this.cardsHiddenFromOwner = false;
 
     // NEW 13.1 (the-cut-spec_v13-1.md D.1/F): table-lifetime, never reset
     // per hand. gameChoiceSeq counts successful setGameChoice() calls;
     // savedOptionsByGame remembers each game's last-started Dealer options.
     this.gameChoiceSeq = 0;
     this.savedOptionsByGame = {};
+
+    // NEW 13.2 (the-cut-spec_v13-2.md Part B): 7-Card No Peek per-hand
+    // state. All reset in _performFullReset().
+    this.revealRoundNumber = 0; // 1st, 2nd... Reveal -- incremented on each new revealer's turn
+    this.revealTurnPlayerId = null; // who holds the Reveal Rail
+    this.lastRevealerId = null; // the most recent revealer (next revealer goes clockwise from them)
+    this.highHandPlayerId = null; // whose Open Betting the Dealer last approved by opening betting
+    this.revealEndedBy = null; // 'first' | 'openBetting' | 'fold' -- how the latest reveal ended
+    this.preselectedOpeningBettorId = null; // the automatic pre-selection for this RevealBetting
+    this._revealsThisTurn = 0; // Reveal Next clicks in the current revealer's turn (kept across a Reject)
+    this._pendingHighHandId = null; // becomes highHandPlayerId when the Dealer opens betting
+    this._revealResume = false; // a Reject re-enters Reveal for the same revealer, not a new one
 
     // NEW 10.3 (the-cut-spec_v10-3.md Part A §2): the most recent
     // pre-current-hand bank snapshot (chips/totalBuyIn per player id),
@@ -702,6 +722,11 @@ class GameTable {
     // all-in player is still eligible to draw and can hold the rail.
     if (this.profile === 'vying' && this.handPhase === 'DrawRound' && this.drawRoundOpen && this.drawTurnPlayerId === player.id) {
       this._applyDrawPass(player);
+      return;
+    }
+    // NEW 13.2 (B.5): a revealer whose grace expires is treated as Fold.
+    if (this.profile === 'nopeek' && this.handPhase === 'Reveal' && this.revealTurnPlayerId === player.id) {
+      this._nopeekRevealFold(player, player.id);
       return;
     }
     if (!this._canAct(player)) return; // no live decision to resolve at all
@@ -1248,6 +1273,11 @@ class GameTable {
   _onEnterPhase(phase) {
     const isPickcard = this.profile === 'pickcard';
     const isVying = this.profile === 'vying';
+    // NEW 13.2: No Peek's own phase entries.
+    if (this.profile === 'nopeek') {
+      if (phase === 'Reveal') this._beginReveal();
+      return;
+    }
     if (!isPickcard && !isVying) return;
     if (isPickcard && phase === 'PickDraw') {
       this._beginPickDraw();
@@ -1268,8 +1298,42 @@ class GameTable {
       // the hand would sit at Showdown with no legal action. Straight to
       // CycleComplete instead.
       const multiPot = Array.isArray(this.pots) && this.pots.length > 0;
-      if (!multiPot && this.pot <= 0) this._completeCycleWithoutClaim();
+      if (!multiPot && this.pot <= 0) {
+        // CHANGED 13.2 (Part A.5): Pick-a-Card with Reveal Pick = At
+        // Showdown waits here until every participant has shown (every
+        // card is still face down). When Drawn, and 7-27 / 15-35, still
+        // go straight to CycleComplete.
+        if (this._zeroPotShowdownWaiting()) {
+          this._maybeFinishZeroPotShowdown();
+          return;
+        }
+        this._completeCycleWithoutClaim();
+      }
     }
+  }
+
+  /** NEW 13.2 (A.5): a $0-pot Pick-a-Card Showdown under At Showdown -- waiting for everyone to show. */
+  _zeroPotShowdownWaiting() {
+    const multiPot = Array.isArray(this.pots) && this.pots.length > 0;
+    return (
+      this.profile === 'pickcard' &&
+      this.handPhase === 'Showdown' &&
+      this.gameOptions?.reveal === 'at-showdown' &&
+      !multiPot &&
+      this.pot <= 0
+    );
+  }
+
+  /**
+   * NEW 13.2 (A.5): once every participant has shown, end the hand (no
+   * claim). Re-run from revealHand() and _reconcilePlayerInputPhases(),
+   * so a participant who leaves, sits out or times out is dropped from
+   * the wait. If someone never shows, the Host's Terminate Cleanly ends
+   * the hand (no new button -- Mike).
+   */
+  _maybeFinishZeroPotShowdown() {
+    if (!this._zeroPotShowdownWaiting()) return;
+    if (this._handParticipants().every((p) => p.revealed)) this._completeCycleWithoutClaim();
   }
 
   /**
@@ -1374,6 +1438,198 @@ class GameTable {
     player.hand.push(card);
     this._advancePickTurn();
     return { ok: true };
+  }
+
+  // ---------------------------------------------------------------
+  // NEW 13.2: 7-Card No Peek, the `nopeek` profile (spec Part B)
+  // ---------------------------------------------------------------
+
+  _faceDownCount(player) {
+    return player.hand.filter((c) => !c.faceUp).length;
+  }
+
+  /**
+   * BUILDFIX 13.2 (Mike): who may be given the Reveal Rail -- a participant
+   * with at least one face-down card who isn't the high-hand holder.
+   */
+  _canTakeRevealRail(player) {
+    return !!player && this._isHandParticipant(player) && player.id !== this.highHandPlayerId && this._faceDownCount(player) > 0;
+  }
+
+  /** BUILDFIX 13.2 (Mike): the hand is over when nobody but the high-hand holder can reveal -- nobody is left who could beat the high hand. */
+  _anyoneLeftToReveal() {
+    return this._handParticipants().some((p) => this._canTakeRevealRail(p));
+  }
+
+  /**
+   * Reveal entry (B.5). A Reject re-enters for the same revealer with the
+   * turn's Reveal Next count kept. Otherwise a new revealer: the 1st
+   * Reveal starts left of the position anchor; later ones go to the next
+   * participant clockwise after the last revealer, skipping the
+   * high-hand holder. Players beaten earlier get the rail again.
+   */
+  _beginReveal() {
+    if (this._revealResume) {
+      this._revealResume = false;
+      this.revealTurnPlayerId = this.lastRevealerId;
+      return;
+    }
+    let order;
+    if (this.revealRoundNumber === 0) {
+      order = this._seatsClockwiseFromAnchorLeft();
+    } else {
+      const n = this.turnOrder.length;
+      const lastIdx = this.turnOrder.indexOf(this.lastRevealerId);
+      order = [];
+      for (let i = 1; i <= n; i++) order.push(this.turnOrder[((lastIdx === -1 ? 0 : lastIdx) + i) % n]);
+    }
+    // CHANGED BUILDFIX 13.2 (Mike): a player with no face-down cards is never given the Reveal Rail.
+    const nextId = order.find((id) => this._canTakeRevealRail(this.getPlayer(id)));
+    if (!nextId) {
+      // Can't happen when entered through _nopeekPhaseAfterBetting() (it
+      // checks for 2+ participants first) -- a safe end, not a hang.
+      this._setHandPhase('Showdown');
+      return;
+    }
+    this.revealRoundNumber += 1;
+    this.revealTurnPlayerId = nextId;
+    this.lastRevealerId = nextId;
+    this.revealEndedBy = null;
+    this.preselectedOpeningBettorId = null;
+    this.openingBettorId = null;
+    this._revealsThisTurn = 0;
+  }
+
+  _requireRevealer(requesterId) {
+    if (this.profile !== 'nopeek' || this.handPhase !== 'Reveal') {
+      return { error: 'Revealing is only available during a reveal.' };
+    }
+    if (this.pendingClaim) return { error: 'A claim is pending approval.' };
+    if (requesterId !== this.revealTurnPlayerId) return { error: "It isn't your turn to reveal." };
+    const player = this.getPlayer(requesterId);
+    if (!player) return { error: 'Player not found.' };
+    return { player };
+  }
+
+  /** Reveal Next (B.5): the revealer's leftmost face-down card turns face up for everyone (a public up card from then on). The 1st Reveal's first card ends that turn automatically. */
+  revealNext(requesterId) {
+    const guard = this._requireRevealer(requesterId);
+    if (guard.error) return { ok: false, error: guard.error };
+    const card = guard.player.hand.find((c) => !c.faceUp);
+    if (!card) return { ok: false, error: 'You have no face-down cards left.' };
+    card.faceUp = true;
+    this._revealsThisTurn += 1;
+    if (this.revealRoundNumber === 1) this._endReveal('first');
+    return { ok: true };
+  }
+
+  /** Open Betting (B.5): "I now have the high hand." Needs a Reveal Next this turn, unless no face-down cards are left. */
+  revealOpenBetting(requesterId) {
+    const guard = this._requireRevealer(requesterId);
+    if (guard.error) return { ok: false, error: guard.error };
+    // CHANGED BUILDFIX 13.2 (Mike): always available; the Dealer's Reject handles a mistaken request.
+    this._endReveal('openBetting');
+    return { ok: true };
+  }
+
+  _revealOpenBettingAllowed(player) {
+    return !!player; // CHANGED BUILDFIX 13.2 (Mike): no "Reveal Next first" requirement
+  }
+
+  /**
+   * The reveal's Fold (B.5): from the rail, from a sit-out/leave, or from a
+   * grace expiry. Idempotent about the fold itself (a sit-out may already
+   * have folded them). One participant left, or nobody with a face-down
+   * card left -> Showdown; otherwise RevealBetting with the fold
+   * pre-selection.
+   */
+  _nopeekRevealFold(player, playerId) {
+    if (this.handPhase !== 'Reveal' || this.revealTurnPlayerId !== playerId) return;
+    if (player && !player.folded) {
+      player.folded = true;
+      this._applyFoldedHandsRule(player);
+    }
+    this._endReveal('fold');
+  }
+
+  _endReveal(endedBy) {
+    const revealerId = this.revealTurnPlayerId;
+    this.revealTurnPlayerId = null;
+    this.revealEndedBy = endedBy;
+    if (endedBy === 'fold') {
+      const participants = this._handParticipants();
+      if (participants.length <= 1 || !this._anyoneLeftToReveal()) { // CHANGED BUILDFIX 13.2
+        this._setHandPhase('Showdown');
+        return;
+      }
+    }
+    const candidateId = endedBy === 'fold' ? this._nearestParticipantCounterclockwise(revealerId) : revealerId;
+    this._pendingHighHandId = endedBy === 'fold' ? null : revealerId;
+    this.preselectedOpeningBettorId = this._openerFromCandidate(candidateId);
+    this.openingBettorId = this.preselectedOpeningBettorId;
+    this._setHandPhase('RevealBetting');
+  }
+
+  /** Nearest participant counterclockwise (B.6): always the best remaining showing hand after a fold. */
+  _nearestParticipantCounterclockwise(fromId) {
+    const n = this.turnOrder.length;
+    const idx = this.turnOrder.indexOf(fromId);
+    for (let i = 1; i < n; i++) {
+      const id = this.turnOrder[(((idx === -1 ? 0 : idx) - i) % n + n) % n];
+      const p = this.getPlayer(id);
+      if (p && this._isHandParticipant(p)) return id;
+    }
+    return null;
+  }
+
+  /**
+   * The pre-selected opener must be able to act (an All In player can't
+   * open). If the candidate can't, the nearest player clockwise from them
+   * who can; if nobody can act, null (openBetting() then skips betting,
+   * the same path Stud uses).
+   */
+  _openerFromCandidate(candidateId) {
+    const n = this.turnOrder.length;
+    const idx = this.turnOrder.indexOf(candidateId);
+    if (idx === -1) return null;
+    for (let i = 0; i < n; i++) {
+      const p = this.getPlayer(this.turnOrder[(idx + i) % n]);
+      if (p && this._canAct(p)) return p.id;
+    }
+    return null;
+  }
+
+  /** Reject (B.6): "that hand doesn't beat the high hand." Back to Reveal, same revealer, revealed cards stay up, this turn's Reveal Next count kept. */
+  rejectRevealOpen(requesterId) {
+    const dealer = this.getDealer();
+    if (!dealer || dealer.id !== requesterId) return { ok: false, error: 'Only the Dealer can reject.' };
+    if (!this._rejectAvailable()) return { ok: false, error: 'There is no Open Betting to reject right now.' };
+    this.revealEndedBy = null;
+    this._pendingHighHandId = null;
+    this.preselectedOpeningBettorId = null;
+    this.openingBettorId = null;
+    this._revealResume = true;
+    this._setHandPhase('Reveal');
+    // BUILDFIX 13.2: a rejected revealer with no face-down cards left can't
+    // beat the high hand, so (with no Reveal Rail for them) they're out.
+    const rejected = this.getPlayer(this.revealTurnPlayerId);
+    if (rejected && this._faceDownCount(rejected) === 0) this._nopeekRevealFold(rejected, rejected.id);
+    return { ok: true };
+  }
+
+  _rejectAvailable() {
+    if (this.profile !== 'nopeek' || this.handPhase !== 'RevealBetting' || this.bettingOpen || this.pendingClaim) return false;
+    if (this.revealEndedBy !== 'openBetting') return false;
+    const revealer = this.getPlayer(this.lastRevealerId);
+    return !!revealer && this._isHandParticipant(revealer);
+  }
+
+  /** Where a closed RevealBetting round goes (nopeek.js): one participant left, or nobody with a face-down card left -> Showdown; else the next Reveal. */
+  _nopeekPhaseAfterBetting() {
+    const participants = this._handParticipants();
+    if (participants.length <= 1) return 'Showdown';
+    if (!this._anyoneLeftToReveal()) return 'Showdown'; // CHANGED BUILDFIX 13.2: was "nobody has a face-down card"
+    return 'Reveal';
   }
 
   // ---------------------------------------------------------------
@@ -1546,6 +1802,20 @@ class GameTable {
    * same job _applyFoldBookkeeping() already does for Discard/Declare.
    */
   _reconcilePlayerInputPhases() {
+    // NEW 13.2 (A.5): a $0 At Showdown wait stops waiting on anyone who's gone.
+    if (this.profile === 'pickcard' && this.handPhase === 'Showdown') {
+      this._maybeFinishZeroPotShowdown();
+      return;
+    }
+    // NEW 13.2 (B.5): a revealer who leaves, sits out or times out is
+    // treated as having clicked Fold.
+    if (this.profile === 'nopeek') {
+      if (this.handPhase === 'Reveal' && this.revealTurnPlayerId) {
+        const revealer = this.getPlayer(this.revealTurnPlayerId);
+        if (!revealer || !this._isHandParticipant(revealer)) this._nopeekRevealFold(revealer, this.revealTurnPlayerId);
+      }
+      return;
+    }
     if (this.profile === 'pickcard' && this.handPhase === 'PickDraw') {
       const turn = this.pickTurnPlayerId ? this.getPlayer(this.pickTurnPlayerId) : null;
       if (!turn || !this._isHandParticipant(turn)) this._advancePickTurn();
@@ -1564,6 +1834,9 @@ class GameTable {
 
   /** Folded Hands (B.3): `muck` sends a folding player's cards to the discard pile, out of everyone's view. `leave` (or no option) leaves them exactly as they were. */
   _applyFoldedHandsRule(player) {
+    // NEW 13.2 (B.4): the high-hand holder is cleared if they fold. Every
+    // fold path calls this function, so this is the one place for it.
+    if (player && this.highHandPlayerId === player.id) this.highHandPlayerId = null;
     if (this.gameOptions?.foldedHands !== 'muck') return;
     if (!player.hand.length) return;
     this.discardPile.push(...player.hand);
@@ -1704,7 +1977,7 @@ class GameTable {
 
   /** NEW 5.0: DiscardPhase -> DrawPhase once every active player has Discarded or Stood Pat. */
   _maybeAdvanceFromDiscardPhase() {
-    // AUDIT 13.0 (B.1): Draw-only; pickcard/vying have no DiscardPhase.
+    // AUDIT 13.0 (B.1): Draw-only; pickcard/vying have no DiscardPhase. AUDIT 13.2: nor does nopeek.
     if (this.profile !== 'draw' || this.handPhase !== 'DiscardPhase') return;
     // CHANGED 10.1 (the-cut-spec_v10-1.md §8.2/§8.3 defect 3): routed
     // through _isHandParticipant() (dealt in, not folded, not sitting
@@ -1729,7 +2002,7 @@ class GameTable {
    * own transition into `Declare` is itself gated on that flag).
    */
   _maybeAdvanceFromDeclare() {
-    // CHANGED 13.0 (spec D.2): vying (7-27/15-35) declares too.
+    // CHANGED 13.0 (spec D.2): vying (7-27/15-35) declares too. AUDIT 13.2: nopeek never declares (last player standing claims).
     if ((this.profile !== 'stud' && this.profile !== 'vying') || this.handPhase !== 'Declare') return;
     // CHANGED 10.1: see _maybeAdvanceFromDiscardPhase()'s matching
     // comment -- same fix, same reasoning (defect 3).
@@ -1794,6 +2067,7 @@ class GameTable {
   _defaultFaceUpForPosition(position) {
     // AUDIT 13.0 (B.1): pickcard never deals; vying's Opening Deal is all
     // face down (spec D.2) -- both correctly fall through to `false`.
+    // AUDIT 13.2: nopeek deals all 7 face down too -- `false` is right.
     if (this.profile === 'stud' && Array.isArray(this.gameOptions?.pattern)) {
       const value = this.gameOptions.pattern[position];
       if (value === 'up') return true;
@@ -1890,6 +2164,15 @@ class GameTable {
     // ever arrive through the Pick-a-Card Drawing Rail (pickCard()).
     if (this.profile === 'pickcard') {
       return { ok: false, error: 'There is no deal in Pick-a-Card.' };
+    }
+    // NEW 13.2 (B.2/B.4): No Peek deals 7 each, all face down (hidden
+    // from the owner too, via _redactedHand()); at most 7 players.
+    if (this.profile === 'nopeek') {
+      if (this.handPhase !== 'OpeningDeal') {
+        return { ok: false, error: 'Deal is only available during the Opening Deal phase.' };
+      }
+      if (this._dealableActivePlayers().length > NOPEEK_MAX_PLAYERS) return { ok: false, error: NOPEEK_TOO_MANY_PLAYERS };
+      cardsPerPlayer = 7;
     }
     if (isVying) {
       if (this.handPhase !== 'OpeningDeal') {
@@ -2317,6 +2600,9 @@ class GameTable {
       }
       this._bringInObligationId = null;
       this._setHandPhase(`Street${ctx.studLetter}Betting`);
+    } else if (ctx.profile === 'nopeek') {
+      // NEW 13.2 (B.4): the 1st Reveal starts automatically after the deal.
+      this._setHandPhase('Reveal');
     } else if (ctx.profile === 'vying') {
       // NEW 13.0 (spec D.2/D.3): the Initial Reveal starts automatically
       // (no Dealer click) when the Initial Deal includes a reveal.
@@ -2348,6 +2634,9 @@ class GameTable {
    */
   _performFullReset({ clearFolded }) {
     this._applyPendingSitOuts();
+    // BUILDFIX 13.2: the table is being cleared; whatever is dealt next is
+    // dealt under the current profile.
+    this.cardsHiddenFromOwner = this.profile === 'nopeek';
 
     for (const player of this.players) {
       this.deck.push(...player.hand);
@@ -2390,6 +2679,16 @@ class GameTable {
     this._pickQueue = [];
     this.pickTurnPlayerId = null;
     this.showAllUsed = false;
+    // NEW 13.2: No Peek per-hand state (see the constructor).
+    this.revealRoundNumber = 0;
+    this.revealTurnPlayerId = null;
+    this.lastRevealerId = null;
+    this.highHandPlayerId = null;
+    this.revealEndedBy = null;
+    this.preselectedOpeningBettorId = null;
+    this._revealsThisTurn = 0;
+    this._pendingHighHandId = null;
+    this._revealResume = false;
     this.deck.push(...this.discardPile);
     this.discardPile = [];
     this.deck.push(...this.communityCards);
@@ -2814,7 +3113,7 @@ class GameTable {
     if (player.folded) return { ok: false, error: "You've folded and can't discard." };
     // NEW 13.0 (B.1 audit): no discard in pickcard/vying (the Initial
     // Reveal's card selection is its own action, revealComplete()).
-    if (this.profile === 'pickcard' || this.profile === 'vying') {
+    if (this.profile === 'pickcard' || this.profile === 'vying' || this.profile === 'nopeek') { // CHANGED 13.2: + nopeek
       return { ok: false, error: 'Discard is not part of this game.' };
     }
     const isDraw = this.profile === 'draw';
@@ -2876,7 +3175,7 @@ class GameTable {
     const player = this.getPlayer(requesterId);
     if (!player) return { ok: false, error: 'Player not found.' };
     if (player.folded) return { ok: false, error: "You've folded and can't stand pat." };
-    // AUDIT 13.0 (B.1): already rejects pickcard/vying (not 'draw').
+    // AUDIT 13.0 (B.1): already rejects pickcard/vying (not 'draw'). AUDIT 13.2: and nopeek.
     if (this.profile !== 'draw') {
       return { ok: false, error: 'Stand Pat is only available for the Draw profile.' };
     }
@@ -2975,7 +3274,7 @@ class GameTable {
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
     // NEW 13.0 (B.1 audit): cards reach players in pickcard/vying only
     // through their own rails (pickCard()/drawCard()).
-    if (this.profile === 'pickcard' || this.profile === 'vying') {
+    if (this.profile === 'pickcard' || this.profile === 'vying' || this.profile === 'nopeek') { // CHANGED 13.2: + nopeek
       return { ok: false, error: 'Dealing to players directly is not part of this game.' };
     }
     const isDraw = this.profile === 'draw';
@@ -3045,7 +3344,7 @@ class GameTable {
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
     // NEW 13.0 (B.1 audit): cards reach players in pickcard/vying only
     // through their own rails (pickCard()/drawCard()).
-    if (this.profile === 'pickcard' || this.profile === 'vying') {
+    if (this.profile === 'pickcard' || this.profile === 'vying' || this.profile === 'nopeek') { // CHANGED 13.2: + nopeek
       return { ok: false, error: 'Dealing to players directly is not part of this game.' };
     }
     const isDraw = this.profile === 'draw';
@@ -3117,7 +3416,7 @@ class GameTable {
     }
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
     // NEW 13.0 (B.1 audit): no community cards in pickcard/vying.
-    if (this.profile === 'pickcard' || this.profile === 'vying') {
+    if (this.profile === 'pickcard' || this.profile === 'vying' || this.profile === 'nopeek') { // CHANGED 13.2: + nopeek
       return { ok: false, error: 'Community cards are not part of this game.' };
     }
     const isHoldem = this.profile === 'holdem';
@@ -3384,6 +3683,10 @@ class GameTable {
       // NEW 13.0 (spec C.2): Pick-a-Card has no Deal step to enforce
       // MIN_PLAYERS_TO_DEAL the way every other game's deal() does, so
       // it's checked here, before antes are requested.
+      // NEW 13.2 (B.2): 7 cards each from 52 covers 7 players, not 8.
+      if (this.profile === 'nopeek' && this._dealableActivePlayers().length > NOPEEK_MAX_PLAYERS) {
+        return { ok: false, error: NOPEEK_TOO_MANY_PLAYERS };
+      }
       if (this.profile === 'pickcard' && this._dealableActivePlayers().length < MIN_PLAYERS_TO_DEAL) {
         return { ok: false, error: `Need at least ${MIN_PLAYERS_TO_DEAL} active players with chips to start.` };
       }
@@ -3520,6 +3823,7 @@ class GameTable {
     // presets through.
     // AUDIT 13.0 (B.1): pickcard/vying never get here -- both set
     // usesReAnteableLoop: false, rejected by the capability check above.
+    // AUDIT 13.2: nopeek likewise (usesReAnteableLoop: false).
     const stuckFirstBetting =
       this.reAnteable &&
       this.profile === 'draw' &&
@@ -3717,7 +4021,7 @@ class GameTable {
       this.gameOptions[key] = n;
       return { ok: true };
     }
-    if (key === 'raiseCap' && this.profile === 'vying' && value === 'no-cap') {
+    if (key === 'raiseCap' && (this.profile === 'vying' || this.profile === 'nopeek') && value === 'no-cap') { // CHANGED 13.2: + nopeek
       return { ok: false, error: 'Raise Cap must be a whole number of at least 1.' };
     }
     // NEW 13.1 (Part B.3): Freeze After -- 2, 3, 4, 5 stored as numbers,
@@ -3865,12 +4169,18 @@ class GameTable {
     if (this.profile === 'pickcard') {
       return { ok: false, error: 'There is no betting in Pick-a-Card.' };
     }
+    // NEW 13.2 (B.6): No Peek bets only in RevealBetting, and opens to
+    // the (pre-selected or Dealer-chosen) opening bettor, like Stud.
+    const isNopeek = this.profile === 'nopeek';
+    if (isNopeek && this.handPhase !== 'RevealBetting') {
+      return { ok: false, error: 'Betting is not available right now.' };
+    }
     // NEW 7.0 (§6.8): a genuinely new precondition Draw/Hold'em never
     // needed, since they never require Dealer input to determine who
     // starts. Also confirms the selected player is still eligible --
     // they could in principle have sat out between selection and opening,
     // though the dropdown itself only ever lists active players.
-    if (isStud) {
+    if (isStud || isNopeek) { // CHANGED 13.2: + nopeek
       // NEW 10.4 (the-cut-spec_v10-4.md Part E, live-confirmed): when
       // every remaining hand participant is bettingCapped (all-in), no
       // opener candidate can ever satisfy _canAct(), the dropdown is
@@ -3993,7 +4303,14 @@ class GameTable {
       }
     }
 
-    if (isStud) {
+    if (isNopeek && this._pendingHighHandId) {
+      // NEW 13.2 (B.6): opening betting on a reveal that ended with Open
+      // Betting (or the automatic 1st Reveal) makes that revealer the
+      // high-hand holder.
+      this.highHandPlayerId = this._pendingHighHandId;
+      this._pendingHighHandId = null;
+    }
+    if (isStud || isNopeek) { // CHANGED 13.2: + nopeek
       // The selected opening bettor acts first, full stop -- not "the
       // seat after them" the way Draw's/Hold'em's anchor convention
       // works. Already validated above to be active and eligible.
@@ -4056,11 +4373,13 @@ class GameTable {
     }
     if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
     // AUDIT 13.0 (B.1): already rejects pickcard/vying (vying's opener is automatic, left of the anchor).
-    if (this.profile !== 'stud') {
+    // CHANGED 13.2 (B.6): also No Peek, during RevealBetting before betting opens.
+    if (this.profile !== 'stud' && this.profile !== 'nopeek') {
       return { ok: false, error: 'Select Opening Bettor is only available for the Stud profile.' };
     }
     const studBettingPhases = ['StreetABetting', 'StreetBBetting', 'StreetCBetting', 'StreetDBetting', 'StreetEBetting'];
-    if (!studBettingPhases.includes(this.handPhase)) {
+    const openerPhases = this.profile === 'nopeek' ? ['RevealBetting'] : studBettingPhases;
+    if (!openerPhases.includes(this.handPhase)) {
       return { ok: false, error: 'Select Opening Bettor is only available during a betting street.' };
     }
     if (this.bettingOpen) {
@@ -4337,7 +4656,8 @@ class GameTable {
   _fixedLimitSize() {
     // NEW 13.0 (spec B.2): one bet amount, every round -- every bet and
     // every raise is exactly `fixedBet`.
-    if (this.profile === 'vying') {
+    // CHANGED 13.2 (B.1): No Peek uses the same single Fixed Bet.
+    if (this.profile === 'vying' || this.profile === 'nopeek') {
       return typeof this.gameOptions?.fixedBet === 'number' ? this.gameOptions.fixedBet : 0;
     }
     // AUDIT 13.0 (B.1): pickcard never opens betting, falls to `return 0`.
@@ -4878,6 +5198,16 @@ class GameTable {
       return this._continueDeal(this._dealQueue || []);
     }
 
+    // NEW 13.2 (B.5): the Reveal Rail's Fold -- the revealer only, at any
+    // time during their reveal (before or after any Reveal Next).
+    if (this.profile === 'nopeek' && this.handPhase === 'Reveal') {
+      if (this.pendingClaim) return { ok: false, error: 'A claim is pending approval.' };
+      if (requesterId !== this.revealTurnPlayerId) {
+        return { ok: false, error: 'Only the player revealing can fold right now.' };
+      }
+      this._nopeekRevealFold(this.getPlayer(requesterId), requesterId);
+      return { ok: true };
+    }
     // NEW 13.0 (spec C.2): Pick-a-Card has no Fold anywhere.
     if (this.profile === 'pickcard') {
       return { ok: false, error: 'There is no Fold in Pick-a-Card.' };
@@ -4908,7 +5238,7 @@ class GameTable {
     // StreetABetting; they must Call (pay it) or Raise. Cleared the
     // instant that action resolves (see call()/placeBet() above), so this
     // never blocks Fold for them again this street, let alone any later one.
-    // AUDIT 13.0 (B.1): Stud-only Bring-In; never applies to pickcard/vying.
+    // AUDIT 13.0 (B.1): Stud-only Bring-In; never applies to pickcard/vying. AUDIT 13.2: nor nopeek.
     if (this.profile === 'stud' && this._bringInObligationId === requesterId) {
       return { ok: false, error: "The Bring-In can't be folded -- call or raise." };
     }
@@ -5332,6 +5662,7 @@ class GameTable {
         // reflect what's been dealt.
         // AUDIT 13.0 (B.1/B.3): Hold'em only, unchanged -- never true for
         // pickcard/vying. Show All is a separate mechanism (showAll()).
+        // AUDIT 13.2: no Rabbit Hunt in nopeek either (spec B.1).
         const isEarlyClaimBeforeRiver = this.profile === 'holdem' && this.communityCards.length < 5;
         this.rabbitHuntAvailable = isEarlyClaimBeforeRiver;
         // CHANGED 10.1 (the-cut-spec_v10-1.md §8.3 defect 11): queued
@@ -5358,7 +5689,13 @@ class GameTable {
   revealHand(requesterId) {
     const player = this.getPlayer(requesterId);
     if (!player) return { ok: false, error: 'Player not found.' };
+    // NEW 13.2 (B.3): no Show Cards in No Peek -- it would expose cards
+    // out of turn (and to their own owner). Show All is the only way.
+    if (this.cardsHiddenFromOwner) { // BUILDFIX 13.2: was this.profile === 'nopeek'
+      return { ok: false, error: 'In 7-Card No Peek, cards are revealed one at a time from the Reveal Rail.' };
+    }
     player.revealed = true;
+    this._maybeFinishZeroPotShowdown(); // NEW 13.2 (A.5)
     return { ok: true };
   }
 
@@ -5541,6 +5878,12 @@ class GameTable {
    * or a bare `{ faceUp: false }` stub carrying no suit/rank/id.
    */
   _redactedHand(player, forPlayerId) {
+    // NEW 13.2 (B.3): in No Peek nobody -- the owner included -- sees a
+    // face-down card until it's revealed (Reveal Next turns it face up;
+    // Show All marks the hand revealed).
+    if (this.cardsHiddenFromOwner && !player.revealed) { // BUILDFIX 13.2: was this.profile === 'nopeek'
+      return player.hand.map((card) => (card.faceUp ? card : { faceUp: false }));
+    }
     if (player.id === forPlayerId || player.revealed) return player.hand;
     return player.hand.map((card) => (card.faceUp ? card : { faceUp: false }));
   }
@@ -5615,7 +5958,19 @@ class GameTable {
       // NEW 13.0 (spec B.1 Standing Convention): every new gate, computed
       // here, read directly by the client.
       showAllAvailable: this._showAllAvailable(),
+      cardsHiddenFromOwner: this.cardsHiddenFromOwner, // BUILDFIX 13.2: client hides Show Cards on this, not on profile
       gameChoiceSeq: this.gameChoiceSeq, // NEW 13.1 (Part D.1)
+      // NEW 13.2 (B.7, Standing Convention): No Peek's gates, server-computed.
+      revealTurnPlayerId: this.revealTurnPlayerId,
+      revealRoundNumber: this.revealRoundNumber,
+      highHandPlayerId: this.highHandPlayerId,
+      revealEndedBy: this.revealEndedBy,
+      preselectedOpeningBettorId: this.preselectedOpeningBettorId,
+      rejectAvailable: this._rejectAvailable(),
+      revealNextAvailable:
+        this.profile === 'nopeek' && this.handPhase === 'Reveal' && !!this.revealTurnPlayerId && this._faceDownCount(this.getPlayer(this.revealTurnPlayerId)) > 0,
+      openBettingAvailable:
+        this.profile === 'nopeek' && this.handPhase === 'Reveal' && !!this.revealTurnPlayerId && this._revealOpenBettingAllowed(this.getPlayer(this.revealTurnPlayerId)),
       drawRoundNumber: this.drawRoundNumber,
       drawRoundOpen: this.drawRoundOpen,
       drawTurnPlayerId: this.drawTurnPlayerId,
@@ -5771,6 +6126,8 @@ class GameTable {
         // selection itself (p.revealSelection) is never sent to anyone --
         // the chosen cards simply turn face up once everyone is done.
         frozen: p.frozen,
+        consecutivePasses: p.consecutivePasses, // NEW 13.2 (A.4): public -- passing is public
+        faceDownCount: this.profile === 'nopeek' ? this._faceDownCount(p) : null, // NEW 13.2 (B.7): a count, never identities
         revealDone: p.revealDone,
         eligibleToDraw: this.profile === 'vying' ? this._isEligibleToDraw(p) : false,
       })),

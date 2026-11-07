@@ -20,8 +20,9 @@ const holdem = require('./holdem');
 const stud = require('./stud');
 const pickcard = require('./pickcard'); // NEW 13.0
 const vying = require('./vying'); // NEW 13.0
+const nopeek = require('./nopeek'); // NEW 13.2
 
-const PROFILE_TABLES = { draw, holdem, stud, pickcard, vying };
+const PROFILE_TABLES = { draw, holdem, stud, pickcard, vying, nopeek };
 
 function getProfileTable(profile) {
   return PROFILE_TABLES[profile];

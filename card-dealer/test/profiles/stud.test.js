@@ -388,7 +388,8 @@ test('GAME_CHOICES: audible is a universal Dealer Option, present on every prese
 
 test('GAME_CHOICES: the 16-preset locked-down set, old renamed/deleted/split ids confirmed gone or renamed', () => {
   // CHANGED 13.0: the original locked-down 16 (every non-Home-Game-Favorites entry).
-  const ids = GAME_CHOICES.filter((g) => g.menuGroup !== 'home-favorites').map((g) => g.id);
+  // CHANGED 13.2: also excludes the 13.x profiles (7-Card No Peek sits in 7-Card Stud Variants).
+  const ids = GAME_CHOICES.filter((g) => ['draw', 'stud', 'holdem'].includes(g.profile)).map((g) => g.id);
   assert.strictEqual(ids.length, 16);
   assert.ok(ids.includes('stud-7card-razz')); // renamed from stud-7card-lowball
   assert.ok(ids.includes('stud-7card-stud8')); // renamed from stud-7card-highlow

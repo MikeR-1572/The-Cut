@@ -273,6 +273,44 @@
         return {}; // PreGame, InitialReveal, Declare, Showdown, CycleComplete
       },
     },
+
+    /**
+     * NEW 13.2 (the-cut-spec_v13-2.md B.4/B.6): 7-Card No Peek.
+     * Deal 7 Cards during RequestAntes (inactive) and OpeningDeal. The
+     * reveals themselves need nothing from the Dealer. In RevealBetting,
+     * before betting opens: Select Opening Bettor (pre-selected by the
+     * server -- the revealer, or the nearest participant counterclockwise
+     * after a fold), Open Betting Round, and Reject (only when the reveal
+     * ended with Open Betting -- the server's rejectAvailable).
+     */
+    nopeek: {
+      phaseView(gameTable) {
+        const phase = gameTable.handPhase;
+        if (phase === 'RequestAntes') {
+          return { deal: { visible: true, active: false, count: 7, title: 'Waiting for every active player to pay their ante' } };
+        }
+        if (phase === 'OpeningDeal') {
+          return { deal: { visible: true, active: true, count: 7, title: 'Deal 7 cards, face down, to every active player -- nobody may look' } };
+        }
+        if (phase === 'RevealBetting' && !gameTable.bettingOpen) {
+          const nobodyCanAct = !gameTable.anyHandParticipantCanAct;
+          return {
+            openingBettor: { visible: true, hint: 'High Hand Opens Betting' },
+            openBetting: {
+              visible: true,
+              enabled: nobodyCanAct || !!gameTable.openingBettorId,
+              title: nobodyCanAct
+                ? 'No one can act -- betting will be skipped for this reveal'
+                : gameTable.openingBettorId
+                  ? 'Open a new betting round'
+                  : 'Select an opening bettor first',
+            },
+            reject: { visible: !!gameTable.rejectAvailable },
+          };
+        }
+        return {}; // PreGame, Reveal, RevealBetting (open), Showdown, CycleComplete
+      },
+    },
   };
 
   window.RAIL_TABLES = RAIL_TABLES;

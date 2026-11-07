@@ -875,6 +875,17 @@ button:disabled { cursor: not-allowed; opacity: 0.45; filter: none; }
   border-radius: 4px;
   flex-shrink: 0;
 }
+/* NEW 13.2 (A.4): "Skipped N of M" shares the Frozen badge's spot, in a
+   quieter tone until it actually becomes Frozen. */
+.seat-frozen-badge--skipped {
+  color: var(--ivory-dim);
+  background: transparent;
+  border-color: rgba(110, 160, 200, 0.3);
+  text-transform: none;
+}
+/* NEW 13.2 (A.3): "Open 2nd" / "Drawing Round" -- break after the ordinal. */
+#btn-open-drawing { white-space: pre-line; }
+
 /* NEW 13.0 (spec D.3): "Revealed ✓" during the Initial Reveal -- only that the player is done. */
 .seat-reveal-done-badge {
   font-size: 0.58rem;
@@ -1657,7 +1668,8 @@ select option {
 .personal-declare-action,
 .personal-pick-action,
 .personal-reveal-action,
-.personal-draw-action {
+.personal-draw-action,
+.personal-nopeek-action {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1676,7 +1688,8 @@ select option {
   .personal-declare-action,
   .personal-pick-action,
   .personal-reveal-action,
-  .personal-draw-action { flex-direction: column; align-items: stretch; }
+  .personal-draw-action,
+  .personal-nopeek-action { flex-direction: column; align-items: stretch; }
   #bet-amount { width: 100%; }
   #pick-position { width: 100%; }
 }
